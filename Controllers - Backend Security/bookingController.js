@@ -34,7 +34,7 @@ exports.createBooking = async (req, res) => {
         });
       }
     } catch (emailErr) {
-      console.warn('⚠️  Email dispatch failed (booking still created):', emailErr.message);
+      console.warn('  Email dispatch failed (booking still created):', emailErr.message);
     }
 
     res.status(201).json(mapBooking(booking));
