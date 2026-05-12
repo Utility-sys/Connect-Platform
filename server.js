@@ -58,8 +58,17 @@ app.use('/api/upload',   uploadRoutes);
 app.use('/api/admin',    adminRoutes);
 
 // ── Health check ──────────────────────────────────────────────────────────────
-app.get('/', (_req, res) => res.send('<h1>Connect API is Active</h1><p>The backend is running perfectly on port 5000.</p>'));
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', time: new Date() }));
+
+// ── Serve Frontend in Production ──────────────────────────────────────────────
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, 'dist')));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  });
+} else {
+  app.get('/', (_req, res) => res.send('<h1>Connect API is Active</h1><p>The backend is running perfectly on port 5000.</p>'));
+}
 
 // ── Sync DB then start server ──────────────────────────────────────────────────
 sequelize.sync()
