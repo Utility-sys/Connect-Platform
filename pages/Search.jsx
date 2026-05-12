@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Search, MapPin, Clock, Star, Filter, ChevronDown, List, Grid, X, Sparkles, ArrowRight } from 'lucide-react';
 import { COLOMBO_LOCATIONS, CATEGORIES } from '../data/mockData';
 import { useConnect } from '../context/ConnectContext';
+import { imgSrc } from '../utils/api';
 
 // ── fuzzy helper ─────────────────────────────────────────────────────────────
 const levenshtein = (a, b) => {
@@ -45,6 +46,7 @@ export default function SearchPage() {
 
   const [viewMode, setViewMode]               = useState('grid');
   const [searchQuery, setSearchQuery]         = useState(initialQuery);
+  const [debouncedQuery, setDebouncedQuery]   = useState(initialQuery);
   const [selectedLocations, setSelectedLocations] = useState(initialLoc ? [initialLoc] : []);
   const [selectedTypes, setSelectedTypes]     = useState(initialType ? [initialType] : []);
   const [priceRange, setPriceRange]           = useState(50000);
@@ -55,43 +57,58 @@ export default function SearchPage() {
   useEffect(() => {
     const t = new URLSearchParams(location.search).get('type') || '';
     setSelectedTypes(t ? [t] : []);
-    setSearchQuery(new URLSearchParams(location.search).get('query') || '');
+    const q = new URLSearchParams(location.search).get('query') || '';
+    setSearchQuery(q);
+    setDebouncedQuery(q);
     setSelectedLocations([]);
   }, [location.search]);
+
+  // ── Debounce the search input to save performance ──
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
 
   // Unique values derived from data
   const uniqueLocations = useMemo(() => COLOMBO_LOCATIONS, []);
   const allTypes = useMemo(() => [...CATEGORIES.sports, ...CATEGORIES.entertainment], []);
 
   const filteredVenues = useMemo(() => {
-    let result = allVenues.filter(v => {
-      const q = searchQuery.toLowerCase().trim();
-      const n = v.name.toLowerCase();
+    let result = (allVenues || []).filter(v => {
+      // Visibility Filter: Hide pending/rejected venues from customers
+      if (v.status !== 'Approved') return false;
+
+      const q = debouncedQuery.toLowerCase().trim();
+      const n = (v.name || "").toLowerCase();
       let matchQuery = true;
       if (q) {
-        matchQuery = n.includes(q) || v.type.toLowerCase().includes(q) ||
+        matchQuery = n.includes(q) || (v.type || "").toLowerCase().includes(q) ||
           q.split(' ').some(token =>
             n.split(' ').some(word => levenshtein(word, token) <= 2)
           );
       }
+      
       const matchLoc  = selectedLocations.length === 0 || selectedLocations.includes(v.location);
-      const matchType = selectedTypes.length === 0 || selectedTypes.includes(v.type);
+      const matchType = selectedTypes.length === 0 || (v.type && selectedTypes.includes(v.type));
       const matchPx   = v.priceNum <= priceRange;
-      return matchQuery && matchLoc && matchType && matchPx;
+      const isApproved = v.status === 'Approved';
+      return isApproved && matchQuery && matchLoc && matchType && matchPx;
     });
     if (sortBy === 'Price (Low to High)') result.sort((a, b) => a.priceNum - b.priceNum);
     else if (sortBy === 'Price (High to Low)') result.sort((a, b) => b.priceNum - a.priceNum);
     else if (sortBy === 'Highest Rated') result.sort((a, b) => b.rating - a.rating);
     return result;
-  }, [searchQuery, selectedLocations, selectedTypes, priceRange, sortBy]);
+  }, [debouncedQuery, selectedLocations, selectedTypes, priceRange, sortBy]);
 
   // AI suggestions (same selected type, fallback to top rated)
   const aiSuggestions = useMemo(() => {
     if (filteredVenues.length > 0) return [];
     const baseType = selectedTypes[0] || null;
     const pool = baseType
-      ? allVenues.filter(v => v.type === baseType)
-      : allVenues;
+      ? (allVenues || []).filter(v => v.type === baseType && v.status === 'Approved')
+      : (allVenues || []).filter(v => v.status === 'Approved');
     return [...pool].sort((a, b) => b.rating - a.rating).slice(0, 3);
   }, [filteredVenues, selectedTypes, allVenues]);
 
@@ -321,7 +338,7 @@ export default function SearchPage() {
                       <Link key={v.id} to={`/venue/${v.id}`}
                         className="bg-white dark:bg-slate-800 rounded-2xl overflow-hidden border border-gray-100 dark:border-slate-700 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all group">
                         <div className="h-36 overflow-hidden relative">
-                          <img src={v.img} alt={v.name} className="w-full h-full object-cover group-hover:scale-110 transition duration-700" />
+                          <img src={imgSrc(v.img)} alt={v.name} className="w-full h-full object-cover group-hover:scale-110 transition duration-700" />
                           <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
                         </div>
                         <div className="p-4">
@@ -352,7 +369,7 @@ export default function SearchPage() {
                 >
                   {/* Image */}
                   <div className={`${viewMode === 'grid' ? 'h-48' : 'w-56 shrink-0'} relative overflow-hidden`}>
-                    <img src={venue.img} alt={venue.name} className="w-full h-full object-cover group-hover:scale-110 transition duration-700" />
+                    <img src={imgSrc(venue.img)} alt={venue.name} className="w-full h-full object-cover group-hover:scale-110 transition duration-700" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent" />
                     <div className="absolute top-3 right-3 bg-white/95 backdrop-blur-sm px-2.5 py-1 rounded-xl text-xs font-bold text-primary flex items-center gap-1 shadow">
                       <Star className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500" /> {venue.rating}

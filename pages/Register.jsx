@@ -21,9 +21,11 @@ function Register() {
       role: accountType
     });
     
-    if (user) {
+    if (user && !user.error && !user.requires2FA) {
       if (user.role === 'owner') navigate('/owner-dashboard');
       else navigate('/customer-dashboard');
+    } else if (user && user.error) {
+      alert(user.message || 'Login after registration failed.');
     }
   };
 
@@ -32,11 +34,11 @@ function Register() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-64px)] flex bg-gray-50">
+    <div className="min-h-[calc(100vh-64px)] flex bg-gray-50 dark:bg-slate-900">
       <div className="flex-1 flex flex-col justify-center py-12 px-4 sm:px-6 lg:flex-none lg:px-20 xl:px-24">
         <div className="mx-auto w-full max-w-sm lg:w-[450px] animate-fade-in-up">
           <div>
-            <h2 className="mt-6 text-3xl font-bold font-heading text-textPrimary">Create an account</h2>
+            <h2 className="mt-6 text-3xl font-bold font-heading text-textPrimary dark:text-white">Create an account</h2>
             <p className="mt-2 text-sm text-textSecondary">
               Already have an account?{' '}
               <Link to="/login" className="font-medium text-accent hover:text-primary transition">
@@ -48,16 +50,16 @@ function Register() {
           <div className="mt-8">
             <div className="mt-6">
               
-              <div className="flex bg-gray-100 p-1 rounded-lg mb-6">
+              <div className="flex bg-gray-100 dark:bg-slate-800 p-1 rounded-lg mb-6">
                 <button 
                   onClick={() => setAccountType('user')}
-                  className={`flex-1 py-2 text-sm font-medium rounded-md transition ${accountType === 'user' ? 'bg-white shadow-sm text-primary' : 'text-gray-500 hover:text-primary'}`}
+                  className={`flex-1 py-2 text-sm font-medium rounded-md transition ${accountType === 'user' ? 'bg-white dark:bg-slate-700 shadow-sm text-primary dark:text-white' : 'text-gray-500 hover:text-primary dark:text-slate-400 dark:hover:text-white'}`}
                 >
                   I want to book
                 </button>
                 <button 
                   onClick={() => setAccountType('owner')}
-                  className={`flex-1 py-2 text-sm font-medium rounded-md transition ${accountType === 'owner' ? 'bg-white shadow-sm text-primary' : 'text-gray-500 hover:text-primary'}`}
+                  className={`flex-1 py-2 text-sm font-medium rounded-md transition ${accountType === 'owner' ? 'bg-white dark:bg-slate-700 shadow-sm text-primary dark:text-white' : 'text-gray-500 hover:text-primary dark:text-slate-400 dark:hover:text-white'}`}
                 >
                   I own a venue
                 </button>
@@ -69,7 +71,7 @@ function Register() {
               >
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label htmlFor="first-name" className="block text-sm font-medium text-textPrimary">
+                    <label htmlFor="first-name" className="block text-sm font-medium text-textPrimary dark:text-slate-300">
                       First name
                     </label>
                     <div className="mt-1">
@@ -80,12 +82,12 @@ function Register() {
                         required
                         value={formData.firstName}
                         onChange={handleChange}
-                        className="appearance-none block w-full px-4 py-3 border border-border rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-accent focus:border-accent sm:text-sm bg-white"
+                        className="appearance-none block w-full px-4 py-3 border border-border dark:border-slate-700 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-accent focus:border-accent sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                       />
                     </div>
                   </div>
                   <div>
-                    <label htmlFor="last-name" className="block text-sm font-medium text-textPrimary">
+                    <label htmlFor="last-name" className="block text-sm font-medium text-textPrimary dark:text-slate-300">
                       Last name
                     </label>
                     <div className="mt-1">
@@ -96,14 +98,14 @@ function Register() {
                         required
                         value={formData.lastName}
                         onChange={handleChange}
-                        className="appearance-none block w-full px-4 py-3 border border-border rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-accent focus:border-accent sm:text-sm bg-white"
+                        className="appearance-none block w-full px-4 py-3 border border-border dark:border-slate-700 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-accent focus:border-accent sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                       />
                     </div>
                   </div>
                 </div>
 
                 <div>
-                  <label htmlFor="email" className="block text-sm font-medium text-textPrimary">
+                  <label htmlFor="email" className="block text-sm font-medium text-textPrimary dark:text-slate-300">
                     Email address
                   </label>
                   <div className="mt-1">
@@ -116,13 +118,13 @@ function Register() {
                       value={formData.email}
                       onChange={handleChange}
                       placeholder="you@example.com"
-                      className="appearance-none block w-full px-4 py-3 border border-border rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-accent focus:border-accent sm:text-sm bg-white"
+                      className="appearance-none block w-full px-4 py-3 border border-border dark:border-slate-700 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-accent focus:border-accent sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label htmlFor="password" className="block text-sm font-medium text-textPrimary">
+                  <label htmlFor="password" className="block text-sm font-medium text-textPrimary dark:text-slate-300">
                     Password
                   </label>
                   <div className="mt-1">
@@ -134,9 +136,10 @@ function Register() {
                       value={formData.password}
                       onChange={handleChange}
                       placeholder="••••••••"
-                      className="appearance-none block w-full px-4 py-3 border border-border rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-accent focus:border-accent sm:text-sm bg-white"
+                      className="appearance-none block w-full px-4 py-3 border border-border dark:border-slate-700 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-accent focus:border-accent sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                     />
                   </div>
+                  <p className="mt-2 text-xs text-slate-500">Must be at least 8 characters with 1 uppercase, 1 lowercase, 1 number, and 1 special character.</p>
                 </div>
 
                 <div className="flex items-center">

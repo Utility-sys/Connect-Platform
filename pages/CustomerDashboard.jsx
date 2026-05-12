@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Calendar, CreditCard, MapPin, CheckCircle, Clock,
-  Edit2, X, AlertCircle, Check, Shield, User, Star
+  Edit2, X, AlertCircle, Check, Shield, User, Star, ChevronDown
 } from 'lucide-react';
 import { generateTimeSlots } from '../data/mockData';
 import { useConnect } from '../context/ConnectContext';
@@ -16,10 +16,20 @@ const imgSrc = (path) => {
 
 // ── 3-hour modification window ────────────────────────────────────────────────
 const canModify = (dateStr, slots) => {
-  const hour = Array.isArray(slots) ? slots[0] : slots;
+  let arr = slots;
+  if (typeof slots === 'string' && slots.startsWith('[')) { try { arr = JSON.parse(slots); } catch(e){} }
+  const hour = Array.isArray(arr) ? arr[0] : arr;
   if (!hour) return false;
-  const dt = new Date(`${dateStr}T${String(hour).padStart(2,'0')}:00:00`);
+  const dt = new Date(`${dateStr}T${String(hour).replace(/"/g, '').padStart(2,'0')}:00:00`);
   return dt - new Date() > 3 * 60 * 60 * 1000;
+};
+
+const isPastBooking = (dateStr, slots) => {
+  let arr = slots;
+  if (typeof slots === 'string' && slots.startsWith('[')) { try { arr = JSON.parse(slots); } catch(e){} }
+  const hour = Array.isArray(arr) ? arr[0] : arr;
+  const dt = new Date(`${dateStr}T${String(hour || 23).replace(/"/g, '').padStart(2,'0')}:59:59`);
+  return dt < new Date();
 };
 
 const timeSlotsList = generateTimeSlots();
@@ -31,34 +41,70 @@ const statusBadge = {
 };
 
 const timeLabel = (slots) => {
-  const arr = Array.isArray(slots) ? slots : (slots ? [slots] : []);
-  return arr.sort().map(h => timeSlotsList.find(s => s.value === h)?.label || `${h}:00`).join(', ') || '—';
+  if (!slots) return '—';
+  let arr = slots;
+  if (typeof slots === 'string') {
+    try {
+      if (slots.startsWith('[')) arr = JSON.parse(slots);
+      else arr = slots.split(',');
+    } catch (e) {
+      arr = [slots];
+    }
+  }
+  if (!Array.isArray(arr)) arr = [arr];
+  return arr.sort().map(h => timeSlotsList.find(s => s.value === String(h).trim().replace(/"/g, ''))?.label || `${String(h).trim().replace(/"/g, '')}:00`).join(', ') || '—';
 };
 
 export default function CustomerDashboard() {
   const { bookings: allBookings, currentUser, cancelBooking, updateBooking } = useConnect();
   const location = useLocation();
   const navigate  = useNavigate();
+
+  // ── Role Guard: Only customers can see this ──────────────────────────────
+  useEffect(() => {
+    if (!currentUser) {
+      navigate('/login', { replace: true });
+      return;
+    }
+    if (currentUser.role === 'owner') {
+      navigate('/owner-dashboard', { replace: true });
+    } else if (currentUser.role === 'admin' || currentUser.role === 'user') {
+      // Allowed
+    }
+  }, [currentUser, navigate]);
+
   const showConfirmed = new URLSearchParams(location.search).get('status') === 'confirmed';
   const today = new Date().toISOString().split('T')[0];
+
 
   // ── Filter to this user's bookings ────────────────────────────────────────
   const myBookings = useMemo(() =>
     allBookings.filter(b => b.customerId === currentUser?.id || b.userId === currentUser?.id)
   , [allBookings, currentUser]);
 
-  const activeBookings    = useMemo(() => myBookings.filter(b => b.status !== 'Cancelled'), [myBookings]);
-  const cancelledBookings = useMemo(() => myBookings.filter(b => b.status === 'Cancelled'), [myBookings]);
+  const activeBookings    = useMemo(() => 
+    myBookings.filter(b => b.status !== 'Cancelled' && !isPastBooking(b.date, b.timeSlots))
+  , [myBookings]);
+
+  const historyBookings = useMemo(() => 
+    myBookings.filter(b => b.status === 'Cancelled' || isPastBooking(b.date, b.timeSlots))
+  , [myBookings]);
+
+  const [bookingView, setBookingView] = useState('active'); // 'active' | 'history'
 
   const paymentHistory = useMemo(() =>
     myBookings.map(b => ({
       id:     b.id,
+      venueName: b.venueName || 'Venue',
+      date:   b.date,
       amount: `LKR ${(b.totalPrice || 0).toLocaleString()}.00`,
       method: 'Visa ending in 4242',
       status: b.status === 'Cancelled' ? 'Refunded' : 'Successful',
       colour: b.status === 'Cancelled' ? 'text-gray-500' : 'text-green-600',
     }))
   , [myBookings]);
+
+  const [showPayments, setShowPayments] = useState(false);
 
   // ── Edit modal state ──────────────────────────────────────────────────────
   const [editTarget, setEditTarget]   = useState(null);
@@ -153,24 +199,38 @@ export default function CustomerDashboard() {
 
             {/* Active */}
             <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700">
-              <h2 className="text-xl font-bold text-textPrimary dark:text-white mb-5 flex items-center gap-2">
-                <Calendar className="w-5 h-5 text-accent" /> Active Bookings
-                <span className="ml-auto text-sm font-normal text-textSecondary dark:text-slate-400">
-                  {activeBookings.length} booking{activeBookings.length !== 1 ? 's' : ''}
-                </span>
-              </h2>
+              <div className="flex items-center justify-between mb-8">
+                <h2 className="text-xl font-bold text-textPrimary dark:text-white flex items-center gap-2">
+                  <Calendar className="w-5 h-5 text-accent" /> 
+                  {bookingView === 'active' ? 'Active Bookings' : 'Booking History'}
+                </h2>
+                <div className="flex bg-gray-100 dark:bg-slate-900 p-1 rounded-xl">
+                  <button 
+                    onClick={() => setBookingView('active')}
+                    className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${bookingView === 'active' ? 'bg-white dark:bg-slate-800 text-accent shadow-sm' : 'text-gray-400 hover:text-textPrimary'}`}
+                  >
+                    Active
+                  </button>
+                  <button 
+                    onClick={() => setBookingView('history')}
+                    className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${bookingView === 'history' ? 'bg-white dark:bg-slate-800 text-accent shadow-sm' : 'text-gray-400 hover:text-textPrimary'}`}
+                  >
+                    History
+                  </button>
+                </div>
+              </div>
 
-              {activeBookings.length === 0 ? (
+              {(bookingView === 'active' ? activeBookings : historyBookings).length === 0 ? (
                 <div className="text-center py-10 text-textSecondary dark:text-slate-400">
                   <Calendar className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                  <p>No active bookings. <Link to="/search" className="text-accent hover:underline">Book a venue</Link></p>
+                  <p>No {bookingView} bookings found. <Link to="/search" className="text-accent hover:underline">Book a venue</Link></p>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {activeBookings.map(b => {
+                  {(bookingView === 'active' ? activeBookings : historyBookings).map(b => {
                     const modErr = modifyErrors[b.id];
                     return (
-                      <div key={b.id} className="border border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-900/50 rounded-2xl overflow-hidden">
+                      <div key={b.id} className="border border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-900/50 rounded-2xl overflow-hidden animate-fade-in">
                         <div className="flex flex-col sm:flex-row items-start gap-4 p-4">
                           <div className="w-20 h-20 rounded-xl overflow-hidden flex-shrink-0">
                             <img src={imgSrc(b.img)} alt={b.venueName} className="w-full h-full object-cover" />
@@ -195,19 +255,31 @@ export default function CustomerDashboard() {
                         <div className="border-t border-gray-100 dark:border-slate-700 px-4 py-3 flex flex-wrap items-center gap-3 bg-white dark:bg-slate-800">
                           <span className="font-bold text-primary dark:text-white text-sm">LKR {(b.totalPrice||0).toLocaleString()}</span>
                           <div className="ml-auto flex gap-2">
-                            <button
-                              onClick={() => openEdit(b)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold text-white transition active:scale-95"
-                              style={{ background: 'var(--grad-nav)' }}
-                            >
-                              <Edit2 className="w-3.5 h-3.5" /> Edit
-                            </button>
-                            <button
-                              onClick={() => openCancel(b)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border-2 border-red-300 text-red-600 dark:border-red-700 dark:text-red-400 text-sm font-semibold hover:bg-red-600 hover:text-white hover:border-red-600 transition active:scale-95"
-                            >
-                              <X className="w-3.5 h-3.5" /> Cancel
-                            </button>
+                            {isPastBooking(b.date, b.timeSlots) ? (
+                              <Link
+                                to={`/venue/${b.venueId}#reviews-section`}
+                                className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-sm font-bold text-white transition active:scale-95 shadow-md shadow-accent/20"
+                                style={{ background: 'var(--grad-fire)' }}
+                              >
+                                <Star className="w-3.5 h-3.5 fill-white" /> Share Experience
+                              </Link>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => openEdit(b)}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold text-white transition active:scale-95"
+                                  style={{ background: 'var(--grad-nav)' }}
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" /> Edit
+                                </button>
+                                <button
+                                  onClick={() => openCancel(b)}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border-2 border-red-300 text-red-600 dark:border-red-700 dark:text-red-400 text-sm font-semibold hover:bg-red-600 hover:text-white hover:border-red-600 transition active:scale-95"
+                                >
+                                  <X className="w-3.5 h-3.5" /> Cancel
+                                </button>
+                              </>
+                            )}
                           </div>
                         </div>
 
@@ -227,97 +299,83 @@ export default function CustomerDashboard() {
               )}
             </div>
 
-            {/* Cancelled */}
-            {cancelledBookings.length > 0 && (
-              <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700">
-                <h2 className="text-xl font-bold text-textPrimary dark:text-white mb-5 flex items-center gap-2">
-                  <X className="w-5 h-5 text-red-500" /> Cancelled Bookings
-                </h2>
-                <div className="space-y-3">
-                  {cancelledBookings.map(b => (
-                    <div key={b.id} className="border border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-900/50 p-4 rounded-xl flex flex-col gap-2 opacity-80 hover:opacity-100 transition">
-                      <div className="flex items-center gap-4">
-                        <div className="w-14 h-14 rounded-xl overflow-hidden flex-shrink-0">
-                          <img src={imgSrc(b.img)} alt={b.venueName} className="w-full h-full object-cover grayscale" />
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="font-bold text-textPrimary dark:text-white line-through text-sm">{b.venueName}</h4>
-                          <div className="text-xs text-textSecondary dark:text-slate-400 mt-0.5">{b.date} · {timeLabel(b.timeSlots || b.timeSlot)}</div>
-                        </div>
-                        <span className={`category-pill text-xs ${statusBadge.Cancelled}`}>Cancelled</span>
-                      </div>
-                      {b.cancellationReason && (
-                        <div className="p-3 bg-red-50 dark:bg-red-900/10 rounded-lg border border-red-100 dark:border-red-900/20">
-                          <p className="text-[10px] text-red-600 dark:text-red-400 font-black uppercase tracking-wider mb-1">
-                            {b.cancellationReason === 'Cancelled by customer' ? 'Cancelled by you' : 'Owner Message:'}
-                          </p>
-                          <p className="text-xs italic text-textSecondary dark:text-slate-300">"{b.cancellationReason}"</p>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* ── Sidebar ─────────────────────────────────────────────────────── */}
           <div className="space-y-6">
 
-            {/* Payment History */}
-            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700">
-              <h2 className="text-lg font-bold text-textPrimary dark:text-white mb-5 flex items-center gap-2">
-                <CreditCard className="w-5 h-5 text-blue-500" /> Payment History
-              </h2>
-              {paymentHistory.length === 0 ? (
-                <p className="text-sm text-textSecondary dark:text-slate-400 italic">No transactions yet.</p>
-              ) : (
-                <div className="space-y-4">
-                  {paymentHistory.map((p, i) => (
-                    <div key={i} className="flex justify-between items-start pb-4 border-b border-gray-100 dark:border-slate-700 last:border-0 last:pb-0">
-                      <div>
-                        <p className="font-bold text-textPrimary dark:text-white text-sm">{p.amount}</p>
-                        <p className="text-xs text-textSecondary dark:text-slate-400 mt-0.5">{p.method}</p>
-                        <p className="text-xs text-gray-400 font-mono mt-0.5">#{p.id}</p>
-                      </div>
-                      <span className={`text-xs font-bold ${p.colour}`}>{p.status}</span>
+            {/* Payment History Dropdown */}
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
+              <button 
+                onClick={() => setShowPayments(!showPayments)}
+                className="w-full p-6 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-slate-900/40 transition group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-accent/10 rounded-lg text-accent group-hover:scale-110 transition">
+                    <CreditCard className="w-5 h-5" />
+                  </div>
+                  <h3 className="font-bold text-textPrimary dark:text-white">Payment History</h3>
+                </div>
+                <div className={`transition-transform duration-300 ${showPayments ? 'rotate-180' : ''}`}>
+                  <ChevronDown className="w-5 h-5 text-gray-400" />
+                </div>
+              </button>
+              
+              {showPayments && (
+                <div className="px-6 pb-6 space-y-4 animate-fade-in border-t border-gray-100 dark:border-slate-900">
+                  {paymentHistory.length === 0 ? (
+                    <p className="text-sm text-textSecondary dark:text-slate-400 italic py-4 text-center">No transactions yet.</p>
+                  ) : (
+                    <div className="pt-4 space-y-4">
+                      {paymentHistory.map((p, i) => (
+                        <div key={i} className="flex flex-col gap-1 pb-4 border-b border-gray-100 dark:border-slate-700 last:border-0 last:pb-0">
+                          <div className="flex justify-between items-center">
+                            <span className="font-extrabold text-textPrimary dark:text-white text-sm">{p.amount}</span>
+                            <span className={`text-[10px] font-black uppercase ${p.colour}`}>{p.status}</span>
+                          </div>
+                          <p className="text-[11px] text-textSecondary dark:text-slate-400 font-medium">{p.venueName} · {p.date}</p>
+                          <p className="text-[10px] text-gray-400 font-mono italic">#{p.id.slice(-8)} · {p.method}</p>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
             </div>
 
             {/* Account info */}
-            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700">
-              <h2 className="text-lg font-bold text-textPrimary dark:text-white mb-4 flex items-center gap-2">
-                <User className="w-5 h-5 text-accent" /> My Account
-              </h2>
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-12 h-12 bg-gradient-to-br from-accent to-orange-400 rounded-full flex items-center justify-center text-white font-black text-lg">
+            <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700">
+              <div className="flex items-center gap-4 mb-8">
+                <div className="w-14 h-14 bg-gradient-to-br from-primary to-accent rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-lg shadow-primary/20">
                   {currentUser?.firstName?.charAt(0) || 'U'}
                 </div>
                 <div>
-                  <p className="font-bold text-textPrimary dark:text-white text-sm">{currentUser?.firstName} {currentUser?.lastName}</p>
+                  <h3 className="font-bold text-textPrimary dark:text-white text-lg leading-tight">{currentUser?.firstName} {currentUser?.lastName}</h3>
                   <p className="text-xs text-textSecondary dark:text-slate-400">{currentUser?.email}</p>
                 </div>
               </div>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between text-textSecondary dark:text-slate-400">
-                  <span>Total bookings</span><span className="font-medium text-textPrimary dark:text-white">{myBookings.length}</span>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-gray-50 dark:bg-slate-900/50 p-3 rounded-xl border border-gray-100 dark:border-slate-700">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Total</p>
+                  <p className="text-lg font-black text-textPrimary dark:text-white">{myBookings.length}</p>
                 </div>
-                <div className="flex justify-between text-textSecondary dark:text-slate-400">
-                  <span>Active</span><span className="font-medium text-textPrimary dark:text-white">{activeBookings.length}</span>
+                <div className="bg-green-50 dark:bg-green-900/10 p-3 rounded-xl border border-green-100 dark:border-green-900/20">
+                  <p className="text-[10px] font-black text-green-600/60 dark:text-green-400/60 uppercase tracking-widest mb-1 text-center">Active</p>
+                  <p className="text-lg font-black text-green-600 dark:text-green-400 text-center">{activeBookings.length}</p>
                 </div>
               </div>
             </div>
 
-            {/* Find venue CTA */}
-            <div className="bg-gradient-to-br from-primary to-primary-lighter p-5 rounded-2xl text-white">
-              <h4 className="font-bold mb-3">Looking for a venue?</h4>
-              <p className="text-xs text-gray-300 mb-4">Browse premium Colombo venues — cricket, futsal, music studios and more.</p>
-              <Link to="/search" className="text-white text-sm font-bold py-2.5 px-4 rounded-xl transition inline-block w-full text-center active:scale-95" style={{ background: 'var(--grad-fire)' }}>
-                Find a Venue
-              </Link>
+            {/* Premium CTA */}
+            <div className="bg-slate-900 rounded-2xl p-6 text-white relative overflow-hidden group">
+              <div className="relative z-10">
+                <h4 className="font-black mb-2 text-lg">Book Another?</h4>
+                <p className="text-xs text-slate-400 mb-5 leading-relaxed">Book premium Colombo venues at the click of a button.</p>
+                <Link to="/search" className="bg-white text-black text-sm font-bold py-3 px-4 rounded-xl transition inline-block w-full text-center hover:bg-accent hover:text-white active:scale-95">
+                  Browse Venues
+                </Link>
+              </div>
+              <div className="absolute -right-8 -bottom-8 w-24 h-24 bg-accent/20 rounded-full blur-2xl group-hover:bg-accent/40 transition-colors" />
             </div>
           </div>
         </div>

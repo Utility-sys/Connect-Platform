@@ -1,88 +1,86 @@
 import { useState, useEffect, useRef } from 'react';
-import { Outlet, Link, useNavigate } from 'react-router-dom';
-import { Moon, Sun, MessageSquare, X, Send, ChevronDown, Activity, Music, Menu } from 'lucide-react';
+import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
+import { Moon, Sun, MessageSquare, X, Send, ChevronDown, Activity, Music, Menu, Settings } from 'lucide-react';
 import Logo from './Logo';
-import { venues, CATEGORIES } from '../data/mockData';
+import { venues as mockVenues, CATEGORIES } from '../data/mockData';
+import { useConnect } from '../context/ConnectContext';
+
 
 // ── Category navigation config ──────────────────────────────────────────────
 const NAV_SPORTS = [
-  { label: 'Cricket',       type: 'Cricket' },
-  { label: 'Futsal',        type: 'Futsal' },
-  { label: 'Basketball',    type: 'Basketball' },
-  { label: 'Badminton',     type: 'Badminton' },
-  { label: 'Swimming Pools',type: 'Swimming' },
+  { label: 'Cricket',        type: 'Cricket' },
+  { label: 'Football',       type: 'Football' },
+  { label: 'Futsal',         type: 'Futsal' },
+  { label: 'Basketball',     type: 'Basketball' },
+  { label: 'Badminton',      type: 'Badminton' },
+  { label: 'Tennis',         type: 'Tennis' },
+  { label: 'Swimming Pools', type: 'Swimming' },
 ];
 const NAV_ENTERTAINMENT = [
   { label: 'Music Studios',       type: 'Music Studio' },
   { label: 'Music Practice Areas',type: 'Music Practice' },
 ];
 
-// ── NLP Chatbot helpers ─────────────────────────────────────────────────────
-const detectCategory = (text) => {
+// ── Advanced NLP Chatbot Engine ─────────────────────────────────────────────
+const SYNONYMS = {
+  'Cricket': ['cricket', 'bat', 'pitch', 'wicket', 'net'],
+  'Football': ['football', 'soccer', '11-a-side', 'five-a-side', 'futsal'],
+  'Basketball': ['basketball', 'hoop', 'dunk'],
+  'Badminton': ['badminton', 'shuttle', 'smash', 'racket', 'racquet'],
+  'Tennis': ['tennis', 'court', 'serve', 'ace'],
+  'Swimming': ['swim', 'pool', 'lap', 'aqua'],
+  'Music Studio': ['studio', 'record', 'mixing', 'track', 'song'],
+  'Music Practice': ['practice', 'rehearsal', 'band room', 'soundproof']
+};
+
+const LOCATIONS = ['colombo', 'kandy', 'galle', 'negombo', 'mount lavinia', 'dehiwala', 'rajagiriya', 'battaramulla'];
+
+const extractEntities = (text) => {
   const t = text.toLowerCase();
-  if (/cricket|bat|pitch|wicket|net/i.test(t)) return 'Cricket';
-  if (/futsal|football|soccer/i.test(t)) return 'Futsal';
-  if (/basketball|hoop|dunk/i.test(t)) return 'Basketball';
-  if (/badminton|shuttle|smash|racket/i.test(t)) return 'Badminton';
-  if (/swim|pool|lap|aqua/i.test(t)) return 'Swimming';
-  if (/studio|record|mixing|track|song/i.test(t)) return 'Music Studio';
-  if (/practice|rehearsal|band room|soundproof/i.test(t)) return 'Music Practice';
-  return null;
-};
+  
+  let category = null;
+  for (const [cat, keywords] of Object.entries(SYNONYMS)) {
+    if (keywords.some(kw => t.includes(kw))) { category = cat; break; }
+  }
 
-const parseIntent = (msg) => {
-  const text = msg.toLowerCase();
-  const category = detectCategory(text);
+  let maxPrice = null;
+  const priceMatch = t.match(/(under|below|max|cheaper than|less than)\s*(rs\.?|lkr)?\s*(\d+,?\d*)/i);
+  if (priceMatch) {
+    maxPrice = parseInt(priceMatch[3].replace(/,/g, ''), 10);
+  }
+
+  let location = null;
+  for (const loc of LOCATIONS) {
+    if (t.includes(loc)) {
+      location = loc.charAt(0).toUpperCase() + loc.slice(1);
+      break;
+    }
+  }
+
   let intent = 'unknown';
-  if (/(price|cost|how much|fee|charge)/i.test(text)) intent = 'get_price';
-  else if (/(where|location|address|find|directions)/i.test(text)) intent = 'get_location';
-  else if (/(book|available|reserve|timeslot)/i.test(text)) intent = 'book_venue';
-  else if (/(recommend|suggest|best|good place|alternative)/i.test(text)) intent = 'recommendation';
-  else if (/(cancel|edit|change|reschedule)/i.test(text)) intent = 'manage_booking';
-  else if (/(help|support|contact|issue)/i.test(text)) intent = 'support';
-  else if (/(hello|hi|hey|greet|good morning|good afternoon)/i.test(text)) intent = 'greeting';
-  return { intent, text, category };
-};
+  if (/(price|cost|how much|fee|charge|cheap|expensive)/i.test(t)) intent = 'get_price';
+  if (/(where|location|address|find|directions|near)/i.test(t)) intent = 'get_location';
+  if (/(book|available|reserve|timeslot|open)/i.test(t)) intent = 'book_venue';
+  if (/(recommend|suggest|best|good|alternative|looking for|want to play)/i.test(t)) intent = 'recommendation';
+  if (/(cancel|edit|change|reschedule|refund)/i.test(t)) intent = 'manage_booking';
+  if (/(help|support|contact|issue|problem)/i.test(t)) intent = 'support';
+  if (/^(hello|hi|hey|greet|good morning|good afternoon)/i.test(t)) intent = 'greeting';
 
-const generateResponse = (nlu) => {
-  const { intent, text, category } = nlu;
-
-  if (intent === 'greeting') return "Hello! I'm Connect AI. Tell me what sport you want to play or what entertainment venue you're looking for!";
-  if (intent === 'support') return "For human support, visit our Help Center in the footer or email support@connect.lk";
-  if (intent === 'manage_booking') return "You can edit or cancel your bookings from your Customer Dashboard. Note: cancellations must be made at least 3 hours before the booking time.";
-
-  if (intent === 'get_price') {
-    if (category) {
-      const catVenues = venues.filter(v => v.type === category);
-      if (catVenues.length) {
-        const min = Math.min(...catVenues.map(v => v.priceNum));
-        const max = Math.max(...catVenues.map(v => v.priceNum));
-        return `${category} venues in Colombo range from LKR ${min.toLocaleString()} to LKR ${max.toLocaleString()} per hour. Use filters on the search page to narrow down by budget.`;
-      }
-    }
-    return "Prices vary by venue type and location. You can view real-time pricing and availability by visiting our Search page and selecting your desired category.";
+  if (intent === 'unknown' && (category || maxPrice || location)) {
+    intent = 'recommendation';
   }
 
-  if (intent === 'book_venue') return "To book: search for your sport → click a venue card → select date & time → proceed to payment. All bookings are confirmed instantly!";
-
-  if (intent === 'recommendation' || category) {
-    const cat = category;
-    if (cat) {
-      const catVenues = venues.filter(v => v.type === cat).sort((a, b) => b.rating - a.rating).slice(0, 2);
-      if (catVenues.length) {
-        const list = catVenues.map(v => `• **${v.name}** (${v.location}) — ${v.price}, Rating: ${v.rating}`).join('\n');
-        return `Here are top-rated ${cat} venues in Colombo:\n${list}\n\nSearch for more on our Venues page!`;
-      }
-    }
-    return "I can give personalized recommendations! Tell me which sport or activity you're interested in — Cricket, Futsal, Badminton, Basketball, Swimming, or Music?";
-  }
-
-  return "I'm not sure about that. Try asking about venue prices, booking steps, or recommendations for a sport! Type 'cricket' or 'music studio' to get started.";
+  return { intent, text: t, category, maxPrice, location };
 };
 
 // ── Main Layout Component ───────────────────────────────────────────────────
 function Layout() {
   const navigate = useNavigate();
+  const locationPath = useLocation();
+  const { currentUser, logoutUser, venues: allVenues } = useConnect();
+  
+  const isAuthPage = locationPath.pathname === '/login' || locationPath.pathname === '/register';
+
 
   // theme
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
@@ -112,7 +110,7 @@ function Layout() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [chatMessages, setChatMessages] = useState([
-    { sender: 'ai', text: "Hi! I'm Connect AI. Ask me about venues, prices, or get recommendations!" }
+    { sender: 'ai', text: "Hi! I'm your Connect AI assistant. I can help you find venues, check prices, or suggest spots based on your budget and location." }
   ]);
   const chatEndRef = useRef(null);
 
@@ -120,17 +118,68 @@ function Layout() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
+  // chatbot logic
+  const responseFromContext = (nlu, allVenues) => {
+    const { intent, category, maxPrice, location } = nlu;
+    const pool = Array.isArray(allVenues) ? allVenues : [];
+    const approvedVenues = pool.filter(v => v.status === 'Approved');
+
+    if (intent === 'greeting') return "Hello! Tell me what sport you want to play, your budget, or your preferred location!";
+    if (intent === 'support') return "For support, visit our Help Center in the footer or email support@connect.lk.";
+    if (intent === 'manage_booking') return "You can edit or cancel your bookings from your Customer Dashboard.";
+    if (intent === 'book_venue') return "Booking is easy: Just search for a venue, select your date/time, and complete checkout!";
+
+    if (intent === 'get_price' && !category && !location) {
+      return "Prices vary widely based on the venue. Could you specify which sport you're interested in?";
+    }
+
+    if (intent === 'recommendation' || intent === 'get_price' || intent === 'get_location') {
+      let matches = approvedVenues;
+
+      if (category) matches = matches.filter(v => v.type === category);
+      if (location) matches = matches.filter(v => v.location.toLowerCase().includes(location.toLowerCase()));
+      if (maxPrice) matches = matches.filter(v => v.priceNum <= maxPrice);
+
+      if (matches.length === 0) {
+        let msg = "I couldn't find any exact matches";
+        if (category) msg += ` for ${category}`;
+        if (location) msg += ` in ${location}`;
+        if (maxPrice) msg += ` under LKR ${maxPrice}`;
+        return msg + ". Try adjusting your search!";
+      }
+
+      if (maxPrice || intent === 'get_price') matches.sort((a, b) => a.priceNum - b.priceNum);
+      else matches.sort((a, b) => b.rating - a.rating);
+
+      const topMatches = matches.slice(0, 3);
+      const resultList = topMatches.map(v => `- ${v.name} (${v.location})\n    ${v.rating}/5 |  LKR ${v.priceNum}/hr`).join('\n\n');
+
+      let intro = `Here are the best matches I found:\n\n`;
+      if (category && maxPrice && location) intro = `Top ${category} venues in ${location} under LKR ${maxPrice}:\n\n`;
+      else if (category && maxPrice) intro = `Most affordable ${category} venues under LKR ${maxPrice}:\n\n`;
+      else if (category && location) intro = `Highest-rated ${category} venues in ${location}:\n\n`;
+      else if (category) intro = `Top-rated ${category} venues right now:\n\n`;
+
+      return intro + resultList + `\n\nSearch these on the Venues page to book!`;
+    }
+
+    return "I'm still learning! Try asking me something like: 'Best football turf in Colombo' or 'Find me a badminton court under 1500'.";
+  };
+
   const handleSendMessage = () => {
     if (!chatInput.trim()) return;
     const userMsg = chatInput.trim();
     setChatMessages(prev => [...prev, { sender: 'user', text: userMsg }]);
     setChatInput('');
     setTimeout(() => {
-      const nlu = parseIntent(userMsg);
-      const aiResponse = generateResponse(nlu);
+      const nlu = extractEntities(userMsg);
+      // Use venues from destructuring at top
+      const aiResponse = responseFromContext(nlu, allVenues);
       setChatMessages(prev => [...prev, { sender: 'ai', text: aiResponse }]);
     }, 650);
+
   };
+
 
   const handleNavCategory = (type) => {
     setActiveDropdown(null);
@@ -150,8 +199,10 @@ function Layout() {
             <Logo className="h-8 drop-shadow-md" />
           </Link>
 
-          {/* Desktop Nav */}
-          <div className="hidden md:flex items-center gap-1">
+          {!isAuthPage && (
+            <>
+              {/* Desktop Nav */}
+              <div className="hidden md:flex items-center gap-1">
 
             {/* Home */}
             <Link to="/" className="nav-link px-3 py-2" onClick={() => setActiveDropdown(null)}>Home</Link>
@@ -230,15 +281,46 @@ function Layout() {
               {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>
 
-            <Link to="/customer-dashboard" className="nav-link px-3 py-2" onClick={() => setActiveDropdown(null)}>Dashboard</Link>
-            <Link to="/login" className="nav-link px-3 py-2" onClick={() => setActiveDropdown(null)}>Log In</Link>
-            <Link
-              to="/register"
-              onClick={() => setActiveDropdown(null)}
-              className="ml-2 btn-fire px-5 py-2 text-sm"
-            >
-              Sign Up
-            </Link>
+            {!currentUser ? (
+              <div className="flex items-center gap-4">
+                <Link to="/login" className="nav-link font-semibold text-sm transition-colors hover:text-white" onClick={() => setActiveDropdown(null)}>Log In</Link>
+                <Link
+                  to="/register"
+                  onClick={() => setActiveDropdown(null)}
+                  className="btn-fire px-6 py-2.5 text-xs font-black uppercase tracking-widest"
+                >
+                  Sign Up
+                </Link>
+              </div>
+            ) : (
+              <div className="flex items-center gap-4 pl-4 border-l border-white/10">
+                <Link 
+                  to={
+                    currentUser?.role === 'admin' ? "/admin-dashboard" : 
+                    currentUser?.role === 'owner' ? "/owner-dashboard" : 
+                    "/customer-dashboard"
+                  } 
+                  className="nav-link text-sm font-bold flex items-center gap-2 group" 
+                  onClick={() => setActiveDropdown(null)}
+                >
+                  <span className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center group-hover:bg-accent transition-colors">
+                    {currentUser?.firstName?.charAt(0)}{currentUser?.lastName?.charAt(0)}
+                  </span>
+                  Dashboard
+                </Link>
+                <Link to="/settings" className="p-2 rounded-xl text-gray-300 hover:text-white hover:bg-white/10 transition" title="Settings">
+                  <Settings className="w-5 h-5" />
+                </Link>
+                <button 
+                  onClick={() => { logoutUser(); navigate('/'); }}
+                  className="px-4 py-2 text-xs font-black uppercase tracking-widest text-white/70 hover:text-red-400 transition"
+                >
+                  Log Out
+                </button>
+              </div>
+            )}
+
+
           </div>
 
           {/* Mobile: dark-mode + hamburger */}
@@ -254,6 +336,8 @@ function Layout() {
               {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
           </div>
+          </>
+          )}
         </div>
 
         {/* ── Mobile Drawer ─────────────────────────────────────────────── */}
@@ -286,10 +370,40 @@ function Layout() {
               </div>
 
               <div className="pt-2 border-t border-white/10 space-y-1">
-                <Link to="/customer-dashboard" onClick={() => setMobileOpen(false)} className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-gray-200 hover:bg-white/10 transition font-medium">Dashboard</Link>
-                <Link to="/login" onClick={() => setMobileOpen(false)} className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-gray-200 hover:bg-white/10 transition font-medium">Log In</Link>
-                <Link to="/register" onClick={() => setMobileOpen(false)} className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-white font-bold transition" style={{background:'var(--grad-fire)'}}>Sign Up</Link>
+                {currentUser ? (
+                  <div className="space-y-1">
+                    <Link 
+                      to={
+                        currentUser?.role === 'admin' ? "/admin-dashboard" :
+                        currentUser?.role === 'owner' ? "/owner-dashboard" : 
+                        "/customer-dashboard"
+                      } 
+                      onClick={() => setMobileOpen(false)} 
+                      className="flex items-center gap-3 px-3 py-3 rounded-xl text-white bg-white/5 border border-white/10 font-bold"
+                    >
+                      <span className="w-8 h-8 rounded-full bg-accent/20 text-accent flex items-center justify-center text-xs">
+                        {currentUser?.firstName?.charAt(0)}
+                      </span>
+                      {currentUser?.role === 'admin' ? 'Admin Portal' : 'My Dashboard'}
+                    </Link>
+                    <Link to="/settings" onClick={() => setMobileOpen(false)} className="flex items-center gap-2 px-3 py-3 rounded-xl text-gray-200 hover:bg-white/10 transition font-medium">
+                      <Settings className="w-5 h-5" /> Settings
+                    </Link>
+                    <button 
+                      onClick={() => { logoutUser(); setMobileOpen(false); navigate('/'); }}
+                      className="w-full text-left flex items-center gap-2 px-3 py-3 rounded-xl text-red-400 hover:bg-white/10 transition font-medium"
+                    >
+                      Log Out
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2 pt-2">
+                    <Link to="/login" onClick={() => setMobileOpen(false)} className="flex items-center justify-center px-3 py-3 rounded-xl text-gray-200 border border-white/10 transition font-bold">Log In</Link>
+                    <Link to="/register" onClick={() => setMobileOpen(false)} className="flex items-center justify-center px-3 py-3 rounded-xl text-white font-black uppercase tracking-widest transition" style={{background:'var(--grad-fire)'}}>Sign Up</Link>
+                  </div>
+                )}
               </div>
+
             </div>
           </div>
         )}

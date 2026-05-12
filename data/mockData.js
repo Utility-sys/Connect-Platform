@@ -3,9 +3,10 @@
 //                  Entertainment = Music Studio, Music Practice
 
 export const CATEGORIES = {
-  sports: ['Cricket', 'Football', 'Futsal', 'Basketball', 'Badminton', 'Swimming'],
+  sports: ['Cricket', 'Football', 'Futsal', 'Basketball', 'Badminton', 'Tennis', 'Swimming'],
   entertainment: ['Music Studio', 'Music Practice'],
 };
+
 
 export const ALL_TYPES = [...CATEGORIES.sports, ...CATEGORIES.entertainment];
 
@@ -356,24 +357,13 @@ export const venues = [
 ];
 
 export const generateTimeSlots = () => {
-  return [
-    { value: '06', label: '6:00 AM - 7:00 AM' },
-    { value: '07', label: '7:00 AM - 8:00 AM' },
-    { value: '08', label: '8:00 AM - 9:00 AM' },
-    { value: '09', label: '9:00 AM - 10:00 AM' },
-    { value: '10', label: '10:00 AM - 11:00 AM' },
-    { value: '11', label: '11:00 AM - 12:00 PM' },
-    { value: '12', label: '12:00 PM - 1:00 PM' },
-    { value: '13', label: '1:00 PM - 2:00 PM' },
-    { value: '14', label: '2:00 PM - 3:00 PM' },
-    { value: '15', label: '3:00 PM - 4:00 PM' },
-    { value: '16', label: '4:00 PM - 5:00 PM' },
-    { value: '17', label: '5:00 PM - 6:00 PM' },
-    { value: '18', label: '6:00 PM - 7:00 PM' },
-    { value: '19', label: '7:00 PM - 8:00 PM' },
-    { value: '20', label: '8:00 PM - 9:00 PM' },
-    { value: '21', label: '9:00 PM - 10:00 PM' },
-    { value: '22', label: '10:00 PM - 11:00 PM' },
-    { value: '23', label: '11:00 PM - 12:00 AM' },
-  ];
+  const slots = [];
+  for (let i = 0; i < 24; i++) {
+    const val = i.toString().padStart(2, '0');
+    const labelStart = i === 0 ? '12:00 AM' : i < 12 ? `${i}:00 AM` : i === 12 ? '12:00 PM' : `${i - 12}:00 PM`;
+    const endI = (i + 1) % 24;
+    const labelEnd = endI === 0 ? '12:00 AM' : endI < 12 ? `${endI}:00 AM` : endI === 12 ? '12:00 PM' : `${endI - 12}:00 PM`;
+    slots.push({ value: val, label: `${labelStart} - ${labelEnd}` });
+  }
+  return slots;
 };

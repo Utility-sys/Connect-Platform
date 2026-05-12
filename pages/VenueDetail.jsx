@@ -3,16 +3,27 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   MapPin, Clock, Star, Share, Heart, Check, Wifi, Car, Coffee,
   Shield, X, CreditCard, Sparkles, ChevronLeft, AlertCircle, ArrowRight,
-  CheckCircle, AlertTriangle, ChevronRight, ZoomIn
+  CheckCircle, AlertTriangle, ChevronRight, ZoomIn, Users
 } from 'lucide-react';
 import { generateTimeSlots } from '../data/mockData';
 import { useConnect } from '../context/ConnectContext';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import { imgSrc } from '../utils/api';
 
-const API_BASE = 'http://localhost:5000';
+// Fix for default Leaflet icon paths in React/Vite
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const validate = {
-  phone:      (v) => /^\+94\s\d{2}\s\d{3}\s\d{4}$/.test(v.trim()),
+  phone:      (v) => /^\(\+94\)\s\d{2}\s\d{3}\s\d{4}$/.test(v.trim()),
   email:      (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()),
   cardNumber: (v) => /^\d{4}\s\d{4}\s\d{4}\s\d{4}$/.test(v.trim()),
   expiry:     (v) => {
@@ -26,13 +37,26 @@ const validate = {
 };
 
 const ERR = {
-  phone:     'Format: +94 XX XXX XXXX (e.g. +94 77 123 4567)',
+  phone:     'Format: (+94) XX XXX XXXX (e.g. (+94) 77 123 4567)',
   email:     'Enter a valid email address',
   cardNumber:'Must be 16 digits — XXXX XXXX XXXX XXXX',
   expiry:    'Invalid expiry (MM/YY, future date)',
   cvvVisa:   'CVV must be 3 digits',
   cvvMaster: 'CVV must be 4 digits for Mastercard',
   name:      'Please enter a valid name',
+};
+
+const fmtPhone    = (raw) => {
+  const d = raw.replace(/\D/g, '').slice(2); // Remove non-digits and skip initial 94 if present
+  const digits = raw.startsWith('(') ? raw.replace(/\D/g, '').slice(2) : raw.replace(/\D/g, '');
+  // Clean logic: always assume +94 is handled by prefix
+  const clean = raw.replace(/\D/g, '').startsWith('94') ? raw.replace(/\D/g, '').slice(2) : raw.replace(/\D/g, '');
+  const f = clean.slice(0, 9);
+  let res = '(+94)';
+  if (f.length > 0) res += ' ' + f.slice(0, 2);
+  if (f.length > 2) res += ' ' + f.slice(2, 5);
+  if (f.length > 5) res += ' ' + f.slice(5, 9);
+  return res;
 };
 
 const fmtCard   = (raw) => raw.replace(/\D/g,'').slice(0,16).replace(/(\d{4})(?=\d)/g,'$1 ').trim();
@@ -46,12 +70,15 @@ const typeColour = (type) => {
   return m[type] || 'bg-gray-100 text-gray-700';
 };
 
-// Resolve image src: if starts with / treat as backend static, else full URL
-const imgSrc = (path) => {
-  if (!path) return 'https://images.unsplash.com/photo-1518604666860-9ed391f76460?auto=format&fit=crop&q=80';
-  if (path.startsWith('/')) return `${API_BASE}${path}`;
-  return path;
+const mapLocation = (locStr) => {
+  const m = {
+    'Colombo 02': [6.920, 79.851], 'Colombo 03': [6.903, 79.853], 'Colombo 04': [6.887, 79.855],
+    'Colombo 05': [6.883, 79.866], 'Colombo 07': [6.908, 79.863], 'Dehiwala':   [6.836, 79.871],
+    'Mount Lavinia': [6.833, 79.864], 'Rajagiriya': [6.907, 79.897], 'Nugegoda':   [6.868, 79.899]
+  };
+  return m[locStr] || [6.927, 79.861];
 };
+
 
 const InlineError = ({ msg }) => msg ? (
   <div className="flex items-start gap-1.5 mt-1.5 text-red-600 dark:text-red-400 text-xs animate-fade-in">
@@ -67,23 +94,151 @@ const Field = ({ label, error, children }) => (
   </div>
 );
 
-const getSameTypeVenues = (v, all, n=3) =>
-  all.filter(x => x.type === v.type && x.id !== v.id).sort((a,b) => b.rating-a.rating).slice(0,n);
+const StarRating = ({ rating, max=5, size=4 }) => (
+  <div className="flex gap-0.5">
+    {Array.from({ length: max }).map((_, i) => (
+      <Star key={i} className={`w-${size} h-${size} ${i < Math.floor(rating) ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300 dark:text-slate-600'}`} />
+    ))}
+  </div>
+);
+
+const getSameTypeVenues = (v, all, n=3) => {
+  if (!v || !all || !Array.isArray(all)) return [];
+  return all
+    .filter(x => x.type === v.type && x.id !== v.id && x.status === 'Approved')
+    .sort((a,b) => (b.rating || 0) - (a.rating || 0))
+    .slice(0,n);
+};
+
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function VenueDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { venues, bookings, createBooking, currentUser, incrementVenueViews } = useConnect();
+  const { 
+    venues, 
+    bookings, 
+    createBooking, 
+    currentUser, 
+    incrementVenueViews, 
+    fetchVenueById,
+    fetchVenueReviews,
+    addReview
+  } = useConnect();
 
-  const venue = useMemo(() => venues.find(v => String(v.id) === String(id)), [venues, id]);
+  const [detailedVenue, setDetailedVenue] = useState(null);
+  const [fetchingDetail, setFetchingDetail] = useState(true);
+
+  // Initial find from context list (summary data)
+  const venueFromContext = useMemo(() => venues.find(v => String(v.id) === String(id)), [venues, id]);
+  
+  // High-privilege venue data (fullAddress etc)
+  useEffect(() => {
+    const loadDetail = async () => {
+      setFetchingDetail(true);
+      const data = await fetchVenueById(id);
+      if (data) setDetailedVenue(data);
+      setFetchingDetail(false);
+    };
+    if (id) loadDetail();
+  }, [id, fetchVenueById]);
+
+  // Combined venue object: Merge global list data with high-privilege detail data
+  const venue = useMemo(() => {
+    if (!detailedVenue && !venueFromContext) return null;
+    return {
+      ...(venueFromContext || {}), // Priority base (updates in real-time via context)
+      ...(detailedVenue || {}),     // Add detailed fields (fullAddress, etc)
+      // Override with context data for live fields if context is available
+      ...(venueFromContext ? { 
+        amenities: venueFromContext.amenities, 
+        capacity: venueFromContext.capacity,
+        price: venueFromContext.price,
+        priceNum: venueFromContext.priceNum,
+        name: venueFromContext.name,
+        type: venueFromContext.type,
+        location: venueFromContext.location,
+        img: venueFromContext.img,
+        gallery: venueFromContext.gallery,
+        matchPrice: venueFromContext.matchPrice
+      } : {})
+    };
+  }, [detailedVenue, venueFromContext]);
+
+
+  // ── Approval Check ────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (venue && venue.status && venue.status !== 'Approved') {
+      const isOwner = currentUser && String(venue.ownerId) === String(currentUser.id);
+      const isAdmin = currentUser && currentUser.role === 'admin';
+      
+      // If guest or unrelated customer tries to access a pending venue
+      if (!isOwner && !isAdmin) {
+        // Redirection logic: If it's not approved, customers can't be here.
+        // We'll show the special 'Under Review' screen instead of redirecting immediately 
+        // to avoid "blank page" feel, but practically they shouldn't reach here from search.
+      }
+    }
+  }, [venue, currentUser]);
+
+
+  if (fetchingDetail && !venueFromContext) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-slate-900 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-accent border-t-transparent rounded-full animate-spin" />
+          <p className="text-gray-400 font-medium animate-pulse">Syncing venue data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!venue) {
+    return (
+      <div className="min-h-screen bg-white dark:bg-slate-900 flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-20 h-20 bg-gray-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-6">
+          <AlertCircle className="w-10 h-10 text-gray-400" />
+        </div>
+        <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Venue Not Found</h2>
+        <p className="text-slate-500 dark:text-slate-400 mb-8 max-w-xs">The venue you're looking for might have been removed or the link is incorrect.</p>
+        <button onClick={() => navigate('/')} className="btn-primary px-8 py-3 rounded-xl">Back to Marketplace</button>
+      </div>
+    );
+  }
+
+
+  // Final visibility check for unapproved venues
+  const isOwner = currentUser && String(venue.ownerId) === String(currentUser.id);
+  const isAdmin = currentUser && currentUser.role === 'admin';
+  if (venue.status !== 'Approved' && !isOwner && !isAdmin) {
+     return (
+      <div className="min-h-screen bg-white dark:bg-slate-900 flex items-center justify-center p-6">
+        <div className="max-w-md w-full text-center space-y-6 animate-scale-in">
+          <div className="w-24 h-24 bg-yellow-50 dark:bg-yellow-900/20 rounded-full flex items-center justify-center mx-auto shadow-sm">
+            <Clock className="w-12 h-12 text-yellow-500 animate-pulse" />
+          </div>
+          <div>
+            <h2 className="text-3xl font-black text-slate-900 dark:text-white mb-2">Under Review</h2>
+            <p className="text-slate-500 dark:text-slate-400 text-lg">This venue is currently being verified by our team. Please check back later!</p>
+          </div>
+          <button onClick={() => navigate('/')} 
+            className="w-full py-4 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold hover:shadow-xl transition-all active:scale-95">
+            Back to Home
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+
 
   // ── Increment view count on mount ─────────────────────────────────────────
   useEffect(() => {
     if (id) incrementVenueViews(id);
   }, [id, incrementVenueViews]);
 
-  // ── All raw timeslots (6 AM – 10 PM) ─────────────────────────────────────
+  // ── All raw timeslots (24 Hours) ──────────────────────────────────────────
   const allTimeSlots = useMemo(() => generateTimeSlots(), []);
 
   // ── Real-time: filter past slots when viewing TODAY ───────────────────────
@@ -91,10 +246,45 @@ export default function VenueDetail() {
   const [selectedDate, setSelectedDate] = useState(todayStr);
 
   const availableTimeSlots = useMemo(() => {
-    if (selectedDate !== todayStr) return allTimeSlots; // future day — all visible
-    const nowHour = new Date().getHours(); // e.g. 13 at 1 PM
-    return allTimeSlots.filter(s => parseInt(s.value, 10) > nowHour);
-  }, [selectedDate, todayStr, allTimeSlots]);
+    let baseSlots = [...allTimeSlots];
+
+    if (venue?.time && venue.time.toLowerCase() !== '24 hours') {
+      try {
+        const parts = venue.time.toLowerCase().split('-');
+        if (parts.length === 2) {
+          const parseHour = (str) => {
+            const match = str.trim().match(/(\d+)\s*(am|pm)/i);
+            if (match) {
+              let num = parseInt(match[1], 10);
+              const meridiem = match[2].toLowerCase();
+              if (meridiem === 'pm' && num !== 12) num += 12;
+              if (meridiem === 'am' && num === 12) num = 0;
+              return num;
+            }
+            return 0;
+          };
+          
+          const startHr = parseHour(parts[0]);
+          let endHr = parseHour(parts[1]);
+          if (endHr === 0) endHr = 24; // Treat 12 AM as the end of the day mathematically
+
+          baseSlots = baseSlots.filter(s => {
+            const val = parseInt(s.value, 10);
+            if (startHr < endHr) {
+              return val >= startHr && val < endHr;
+            } else {
+              // Handles overnight bookings (e.g., 10 PM - 2 AM)
+              return val >= startHr || val < endHr;
+            }
+          });
+        }
+      } catch(e) { console.error('Time parse error:', e); }
+    }
+
+    if (selectedDate !== todayStr) return baseSlots; 
+    const nowHour = new Date().getHours(); 
+    return baseSlots.filter(s => parseInt(s.value, 10) > nowHour);
+  }, [selectedDate, todayStr, allTimeSlots, venue]);
 
   // ── Gallery state ─────────────────────────────────────────────────────────
   const gallery = useMemo(() => {
@@ -113,12 +303,43 @@ export default function VenueDetail() {
   useEffect(() => { setActiveImg(0); }, [venue?.id]);
 
   // ── Booking state ─────────────────────────────────────────────────────────
-  const [bookingMode,   setBookingMode]   = useState('practice');
+  const [bookingMode,   setBookingMode]   = useState('practice'); // 'practice' | 'match'
   const [selectedSlots, setSelectedSlots] = useState([]);
   const [isLiked,       setIsLiked]       = useState(false);
 
+  // ── Reviews state ───────────────────────────────────────────────────────
+  const [reviews, setReviews] = useState([]);
+  const [reviewFormOpen, setReviewFormOpen] = useState(false);
+  const [reviewData, setReviewData] = useState({ rating: 5, comment: '' });
+  const [hasReviewed, setHasReviewed] = useState(false);
+  
+  // Fetch reviews on mount
+  useEffect(() => {
+    if (venue) {
+      fetchVenueReviews(venue.id).then(data => {
+        setReviews(data);
+        if (currentUser) {
+          setHasReviewed(data.some(r => String(r.userId) === String(currentUser.id)));
+        }
+      });
+    }
+  }, [venue, currentUser]);
+
+  const submitReview = async (e) => {
+    e.preventDefault();
+    if (!currentUser) return navigate('/login');
+    const newReview = await addReview(venue.id, reviewData);
+    if (newReview) {
+      setReviews(prev => [newReview, ...prev]);
+      setHasReviewed(true);
+      setReviewFormOpen(false);
+    }
+  };
+
   // Payment modal
+
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
+  const [suggesterModalSlot, setSuggesterModalSlot] = useState(null);
   const [paymentStep,    setPaymentStep]    = useState(1);
   const [isConfirmed,    setIsConfirmed]    = useState(false);
   const [confirmationId, setConfirmationId] = useState('');
@@ -142,6 +363,7 @@ export default function VenueDetail() {
   // Step 3 OTP
   const [otp,      setOtp]      = useState('');
   const [otpError, setOtpError] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
 
   if (!venue) return (
     <div className="min-h-screen flex items-center justify-center dark:bg-slate-900">
@@ -154,18 +376,22 @@ export default function VenueDetail() {
 
   const isCricketGround   = venue.type === 'Cricket'  && venue.facilityType === 'Ground with all facilities';
   const isFootballOrFutsal = venue.type === 'Football' || venue.type === 'Futsal';
-  const hasMatchMode       = isCricketGround || isFootballOrFutsal;
+  const hasMatchMode       = !!venue.matchPrice && (isCricketGround || isFootballOrFutsal || venue.type === 'Tennis' || venue.type === 'Badminton');
 
   const isSlotBooked = (date, time) =>
-    bookings.some(b =>
-      String(b.venueId) === String(venue.id) &&
+    bookings?.some(b =>
+      String(b.venueId) === String(venue?.id) &&
       b.date === date &&
       (b.timeSlots?.includes(time) || b.timeSlot === time) &&
       b.status !== 'Cancelled'
     );
 
+
   // ── Pricing ────────────────────────────────────────────────────────────────
-  const subtotal   = (venue.priceNum || 0) * selectedSlots.length;
+  const subtotal   = bookingMode === 'match' 
+    ? (venue.matchPrice || 0) 
+    : (venue.priceNum || 0) * selectedSlots.length;
+    
   const serviceFee = Math.round(subtotal * 0.1);
   const totalPrice = subtotal + serviceFee;
 
@@ -194,13 +420,18 @@ export default function VenueDetail() {
 
   const handleStep3 = async (e) => {
     e.preventDefault();
+    if (isProcessing) return;
     if (!/^\d{6}$/.test(otp.trim())) { setOtpError('Enter the 6-digit OTP'); return; }
 
+    setIsProcessing(true);
     const booking = await createBooking({
       venueId:      venue.id,
       venueName:    venue.name,
+      userId:       currentUser.id,
       ownerId:      venue.ownerId,
       customerName: `${firstName} ${lastName}`,
+      customerEmail: email, // Captured from Step 1 form
+      customerPhone: phone, // Captured from Step 1 form
       date:         selectedDate,
       timeSlots:    selectedSlots,
       totalPrice,
@@ -210,8 +441,10 @@ export default function VenueDetail() {
       setConfirmationId(String(booking.id).split('-').pop().toUpperCase());
       setIsPayModalOpen(false);
       setIsConfirmed(true);
+      setIsProcessing(false);
     } else {
       setOtpError('Booking failed. Please try again.');
+      setIsProcessing(false);
     }
   };
 
@@ -220,6 +453,7 @@ export default function VenueDetail() {
     setErrors1({}); setErrors2({}); setOtpError('');
     setFirstName(currentUser?.firstName || ''); setLastName(currentUser?.lastName || '');
     setEmail(currentUser?.email || ''); setPhone('');
+    setIsProcessing(false);
     setCardNumber(''); setExpiry(''); setCvv(''); setCardName('');
     setOtp('');
   };
@@ -236,10 +470,11 @@ export default function VenueDetail() {
   const prevMonth = () => { if (calMonth === 0) { setCalMonth(11); setCalYear(y=>y-1); } else setCalMonth(m=>m-1); };
   const nextMonth = () => { if (calMonth === 11) { setCalMonth(0); setCalYear(y=>y+1); } else setCalMonth(m=>m+1); };
 
-  const altVenues = getSameTypeVenues(venue, venues);
+  const altVenues = useMemo(() => getSameTypeVenues(venue, venues), [venue, venues]);
 
   // ── Closed venue banner ─────────────────────────────────────────────────────
-  const IsClosed = venue.isClosed;
+  const IsClosed = venue?.isClosed;
+
 
   return (
     <div className="bg-gray-50 dark:bg-slate-900 min-h-screen pb-20 transition-colors duration-300 animate-fade-in">
@@ -351,11 +586,17 @@ export default function VenueDetail() {
             </div>
             <div className="flex flex-wrap gap-5 text-textSecondary dark:text-slate-400 text-sm items-center border-b border-gray-100 dark:border-slate-700 pb-6">
               <div className="flex items-center gap-1.5 font-semibold text-primary dark:text-white">
-                <Star className="w-5 h-5 text-yellow-500 fill-yellow-500" /> {venue.rating}
-                <span className="underline ml-1 font-normal cursor-pointer hover:text-accent transition">(128 Reviews)</span>
+                <Star className="w-5 h-5 text-yellow-500 fill-yellow-500" /> {venue.rating || 'N/A'}
+                <button 
+                  onClick={() => document.getElementById('reviews-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  className="underline ml-1 font-normal cursor-pointer hover:text-accent transition"
+                >
+                  ({reviews.length} Reviews)
+                </button>
               </div>
-              <div className="flex items-center gap-1.5"><MapPin className="w-4 h-4 text-accent" /> {venue.location}, Colombo</div>
+              <div className="flex items-center gap-1.5"><MapPin className="w-4 h-4 text-accent" /> {venue.fullAddress || `${venue.location}, Colombo`}</div>
               <div className="flex items-center gap-1.5"><Clock className="w-4 h-4 text-accent" /> {venue.time}</div>
+              <div className="flex items-center gap-1.5 font-semibold"><Users className="w-4 h-4 text-accent" /> Max Capacity: {venue.capacity || 10} People</div>
             </div>
           </div>
 
@@ -364,58 +605,106 @@ export default function VenueDetail() {
             <h2 className="text-2xl font-bold text-textPrimary dark:text-white mb-3">About this venue</h2>
             <p className="text-textSecondary dark:text-slate-300 leading-relaxed text-base">{venue.description}</p>
           </div>
-
-          {/* Amenities */}
-          <div>
-            <h2 className="text-2xl font-bold text-textPrimary dark:text-white mb-5">Amenities</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {[
-                { icon: <Wifi className="w-5 h-5 text-primary dark:text-accent" />, label: 'Free Wi-Fi' },
-                { icon: <Car className="w-5 h-5 text-primary dark:text-accent" />, label: 'Free Parking' },
-                { icon: <Coffee className="w-5 h-5 text-primary dark:text-accent" />, label: 'Cafe / Snacks' },
-                { icon: <Shield className="w-5 h-5 text-primary dark:text-accent" />, label: 'Lockers' },
-              ].map((a, i) => (
-                <div key={i} className="flex items-center gap-3 bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-xl p-3 shadow-sm">
-                  {a.icon}<span className="text-sm font-medium text-textSecondary dark:text-slate-300">{a.label}</span>
+          {/* ── Venue Location Map ────────────────────────────────────────────── */}
+          <div className="pt-2 border-t border-gray-100 dark:border-slate-700">
+            <h2 className="text-2xl font-bold text-textPrimary dark:text-white mb-5 flex items-center gap-2">
+              <MapPin className="w-6 h-6 text-accent" /> Venue Location & Directions
+            </h2>
+            
+            <div className="bg-white dark:bg-slate-800 p-2 rounded-3xl shadow-xl border border-gray-100 dark:border-slate-700 overflow-hidden group">
+              <div className="relative h-[350px] w-full rounded-2xl overflow-hidden">
+                <iframe
+                  title="Venue Map"
+                  width="100%"
+                  height="100%"
+                  frameBorder="0"
+                  scrolling="no"
+                  marginHeight="0"
+                  marginWidth="0"
+                  src={`https://maps.google.com/maps?q=${encodeURIComponent(venue.fullAddress || venue.location + " Sri Lanka")}&t=&z=15&ie=UTF8&iwloc=&output=embed`}
+                  className="filter contrast-[1.1] grayscale-[0.2] transition-all duration-700 group-hover:grayscale-0"
+                ></iframe>
+              </div>
+              
+              <div className="p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex-1">
+                  <p className="text-xs font-black text-accent uppercase tracking-widest mb-1 italic">Verified Address</p>
+                  <p className="text-sm font-semibold text-textPrimary dark:text-white leading-relaxed">
+                    {venue.fullAddress || `${venue.location}, Colombo, Sri Lanka`}
+                  </p>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Gallery thumbnail strip (if multiple) */}
-          {gallery.length > 2 && (
-            <div>
-              <h2 className="text-2xl font-bold text-textPrimary dark:text-white mb-4">Gallery</h2>
-              <div className="flex gap-3 overflow-x-auto pb-2">
-                {gallery.map((img, i) => (
-                  <button key={i} onClick={() => { setActiveImg(i); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-                    className={`flex-shrink-0 w-28 h-20 rounded-xl overflow-hidden border-2 transition ${activeImg === i ? 'border-accent' : 'border-transparent'}`}>
-                    <img src={imgSrc(img)} alt="" className="w-full h-full object-cover hover:scale-105 transition duration-300" />
-                  </button>
-                ))}
+                <a
+                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(venue.fullAddress || venue.location + " Sri Lanka")}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-xl text-sm font-bold shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all"
+                >
+                  <MapPin className="w-4 h-4" /> Open in Google Maps
+                </a>
               </div>
             </div>
-          )}
-
-          {/* Reviews */}
-          <div className="pt-6 border-t border-gray-100 dark:border-slate-700">
-            <h2 className="text-2xl font-bold text-textPrimary dark:text-white flex items-center gap-2 mb-6">
-              <Star className="w-6 h-6 text-yellow-500 fill-yellow-500" /> {venue.rating} · 128 Reviews
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {[
-                { name:'Kamindu M.', date:'March 2026', title:'Excellent quality', body:'Best facility in Colombo right now. Well maintained and the lighting is great for night sessions.', stars:5 },
-                { name:'Sarah P.',   date:'February 2026', title:'Great facilities', body:'Easy to book, ample parking, and clean changing rooms. Will definitely come back!', stars:5 },
-              ].map((r, i) => (
-                <div key={i} className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm">
-                  <div className="flex gap-1 mb-2">{[...Array(r.stars)].map((_,j) => <Star key={j} className="w-4 h-4 text-yellow-500 fill-yellow-500" />)}</div>
-                  <h4 className="font-bold text-textPrimary dark:text-white mb-1">{r.title}</h4>
-                  <p className="text-sm text-textSecondary dark:text-slate-400 mb-3">"{r.body}"</p>
-                  <div className="text-xs text-gray-400 font-medium">By {r.name} · {r.date}</div>
-                </div>
-              ))}
-            </div>
           </div>
+
+
+          {/* ── Community Reviews ────────────────────────────────────────────── */}
+          <div id="reviews-section" className="pt-10 border-t border-gray-100 dark:border-slate-700">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h2 className="text-3xl font-black text-textPrimary dark:text-white">Community Experiences</h2>
+                <div className="flex items-center gap-3 mt-1">
+                  <div className="flex items-center gap-1">
+                    <StarRating rating={venue.rating || 0} size={5} />
+                    <span className="text-lg font-black dark:text-white ml-1">{venue.rating || '0.0'}</span>
+                  </div>
+                  <span className="text-sm text-textSecondary dark:text-slate-400 font-medium">Based on {reviews.length} verified experiences</span>
+                </div>
+              </div>
+              
+              {!hasReviewed && currentUser?.role === 'user' && (
+                <button 
+                  onClick={() => setReviewFormOpen(true)}
+                  className="btn-primary py-3 px-6 rounded-2xl flex items-center gap-2 group shadow-lg shadow-primary/20"
+                >
+                  <Sparkles className="w-4 h-4 group-hover:animate-pulse" /> Write a Review
+                </button>
+              )}
+            </div>
+
+            {reviews.length === 0 ? (
+              <div className="bg-gray-50 dark:bg-slate-800/40 border-2 border-dashed border-gray-100 dark:border-slate-700 p-12 rounded-3xl text-center">
+                <div className="w-16 h-16 bg-white dark:bg-slate-800 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-sm">
+                  <Star className="w-8 h-8 text-gray-200" />
+                </div>
+                <h3 className="font-bold text-textPrimary dark:text-white mb-1">No reviews yet</h3>
+                <p className="text-sm text-textSecondary dark:text-slate-400">Be the first to share your experience with this venue!</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-4 overflow-x-auto">
+                {reviews.map((r, idx) => (
+                  <div key={r.id || idx} className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-gray-100 dark:border-slate-700 shadow-sm hover:shadow-md transition">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-gradient-to-br from-primary to-accent rounded-full flex items-center justify-center text-white font-black text-xs">
+                          {(r.reviewerName || 'U')[0].toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="font-bold text-sm text-textPrimary dark:text-white">{r.reviewerName || 'Anonymous'}</p>
+                          <p className="text-[10px] text-textSecondary dark:text-slate-500 uppercase tracking-widest font-black">Verified Customer</p>
+                        </div>
+                      </div>
+                      <StarRating rating={r.rating} size={3} />
+                    </div>
+                    {r.title && <h4 className="font-bold text-textPrimary dark:text-white mb-2">{r.title}</h4>}
+                    <p className="text-sm text-textSecondary dark:text-slate-300 leading-relaxed italic">"{r.comment}"</p>
+                    <div className="mt-4 flex items-center gap-2 text-[10px] text-gray-400 font-bold uppercase tracking-widest">
+                      <Clock className="w-3 h-3" /> {new Date(r.createdAt || Date.now()).toLocaleDateString()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
 
           {/* AI Alternatives */}
           {altVenues.length > 0 && (
@@ -488,7 +777,27 @@ export default function VenueDetail() {
             ) : (
               <>
                 {/* Pricing header */}
-                <div className="flex justify-between items-center mb-6">
+                {/* Booking Mode Selector */}
+              {hasMatchMode && (
+                <div className="bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-900/30 p-4 rounded-2xl mb-4">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-orange-600 dark:text-orange-400 mb-3 text-center">Select Purpose</p>
+                  <div className="flex bg-white dark:bg-slate-800 p-1 rounded-xl shadow-inner relative z-0">
+                    <button onClick={() => setBookingMode('practice')}
+                      className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all ${bookingMode === 'practice' ? 'bg-accent text-white shadow-lg scale-[1.02]' : 'text-slate-500 hover:text-slate-700'}`}>
+                      Practice / Fun
+                    </button>
+                    <button onClick={() => setBookingMode('match')}
+                      className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all ${bookingMode === 'match' ? 'bg-accent text-white shadow-lg scale-[1.02]' : 'text-slate-500 hover:text-slate-700'}`}>
+                      Tournament / Match
+                    </button>
+                  </div>
+                  <p className="text-[9px] text-orange-600/70 dark:text-orange-400/70 mt-2 text-center italic font-medium">
+                    {bookingMode === 'match' ? `Match mode uses a flat fee of LKR ${venue.matchPrice?.toLocaleString()} per session.` : `Hourly rates starting from LKR ${venue.priceNum?.toLocaleString()}.`}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex justify-between items-center mb-6">
                   <div>
                     <span className="text-textSecondary dark:text-slate-400 text-xs font-bold uppercase tracking-widest">Pricing</span>
                     <div className="flex items-baseline gap-1">
@@ -600,8 +909,12 @@ export default function VenueDetail() {
                           return (
                             <button
                               key={s.value}
-                              disabled={booked}
                               onClick={() => {
+                                if (!currentUser || currentUser.role !== 'user') return; // Only users can select slots
+                                if (booked) {
+                                  setSuggesterModalSlot({ time: s, label: s.label });
+                                  return;
+                                }
                                 if (bookingMode==='match'&&isFootballOrFutsal) {
                                   if (active) { setSelectedSlots([]); return; }
                                   const idx = availableTimeSlots.findIndex(t => t.value === s.value);
@@ -614,8 +927,9 @@ export default function VenueDetail() {
                                 }
                               }}
                               className={`py-3 px-1 flex items-center justify-center flex-wrap rounded-xl border-2 text-[10.5px] font-black transition-all tracking-tight leading-loose
-                                ${booked ? 'bg-gray-100 dark:bg-slate-800 border-transparent text-gray-300 dark:text-slate-600 cursor-not-allowed line-through' :
+                                ${booked ? 'bg-gray-100 dark:bg-slate-800 border-transparent text-gray-400 dark:text-slate-500 cursor-pointer line-through hover:border-accent hover:text-accent' :
                                   active ? 'border-accent bg-accent text-white shadow-md scale-105 shadow-orange-500/30' :
+                                  (!currentUser || currentUser.role !== 'user') ? 'bg-gray-50 dark:bg-slate-800/50 border-gray-100 dark:border-slate-700 text-gray-400 dark:text-slate-600 cursor-default' :
                                   'bg-white dark:bg-slate-800 border-gray-100 dark:border-slate-700 text-textSecondary dark:text-slate-400 hover:border-accent/50'}
                               `}
                             >
@@ -650,16 +964,22 @@ export default function VenueDetail() {
                 <button
                   onClick={() => {
                     if (!currentUser) { navigate('/login'); return; }
+                    if (currentUser.role !== 'user') return; // Restriction
                     if (selectedDate && selectedSlots.length > 0) setIsPayModalOpen(true);
                   }}
+                  disabled={currentUser && currentUser.role !== 'user'}
                   className={`w-full py-4 mt-6 rounded-2xl font-black text-sm transition-all duration-300 active:scale-95 flex items-center justify-center gap-2 ${
-                    !currentUser || (selectedDate && selectedSlots.length > 0)
+                    (!currentUser || currentUser.role === 'user') && (selectedDate && selectedSlots.length > 0)
                       ? 'text-white shadow-fire'
                       : 'bg-gray-100 dark:bg-slate-700 text-gray-400 dark:text-slate-500 cursor-not-allowed'
                   }`}
-                  style={!currentUser || (selectedDate && selectedSlots.length > 0) ? { background: 'var(--grad-fire)' } : {}}
+                  style={(!currentUser || currentUser.role === 'user') && (selectedDate && selectedSlots.length > 0) ? { background: 'var(--grad-fire)' } : {}}
                 >
-                  {!currentUser ? 'Sign in to Book' : !selectedDate ? 'Select a Date' : selectedSlots.length===0 ? 'Pick Your Time' : 'Reserve Fast Track →'}
+                  {!currentUser ? 'Sign in to Book' : 
+                   currentUser.role === 'owner' ? 'Viewing as Owner' :
+                   currentUser.role === 'admin' ? 'Viewing as Admin' :
+                   !selectedDate ? 'Select a Date' : 
+                   selectedSlots.length===0 ? 'Pick Your Time' : 'Reserve Fast Track →'}
                 </button>
                 <div className="flex items-center justify-center gap-2 mt-4 text-[10px] text-textSecondary dark:text-slate-500 font-medium">
                   <Shield className="w-3.5 h-3.5 text-success" /> Trusted Secure Checkout
@@ -720,8 +1040,15 @@ export default function VenueDetail() {
                   <Field label="Email Address" error={errors1.email}>
                     <input type="email" className={`form-field ${errors1.email?'form-field-error':''}`} value={email} onChange={e=>setEmail(e.target.value)} placeholder="kasun@email.com" />
                   </Field>
-                  <Field label="Phone Number (+94 XX XXX XXXX)" error={errors1.phone}>
-                    <input type="tel" className={`form-field ${errors1.phone?'form-field-error':''}`} value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+94 77 123 4567" maxLength={16} />
+                  <Field label="Phone Number" error={errors1.phone}>
+                    <input 
+                      type="tel" 
+                      className={`form-field ${errors1.phone?'form-field-error':''}`} 
+                      value={phone || '(+94) '} 
+                      onChange={e=>setPhone(fmtPhone(e.target.value))} 
+                      placeholder="(+94) 77 123 4567" 
+                      maxLength={17} 
+                    />
                   </Field>
                   <button type="submit" className="btn-fire w-full mt-2 py-3.5 rounded-xl">Continue to Payment →</button>
                 </form>
@@ -804,8 +1131,9 @@ export default function VenueDetail() {
                     <InlineError msg={otpError} />
                     <button type="button" className="text-xs text-accent hover:underline mt-2 block mx-auto" onClick={()=>{}}>Resend OTP</button>
                   </div>
-                  <button type="submit" className="btn-fire w-full py-3.5 rounded-xl flex items-center justify-center gap-2">
-                    <Check className="w-4 h-4" /> Verify &amp; Pay
+                  <button type="submit" disabled={isProcessing} className="btn-fire w-full py-3.5 rounded-xl flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed">
+                    {isProcessing ? <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
+                    {isProcessing ? 'Processing...' : 'Verify & Pay'}
                   </button>
                   <button type="button" onClick={()=>setPaymentStep(2)} className="w-full text-sm text-gray-400 hover:text-gray-600 py-1 hover:underline transition">← Back</button>
                 </form>
@@ -814,6 +1142,124 @@ export default function VenueDetail() {
             <div className="bg-gray-50 dark:bg-slate-800/50 border-t border-gray-100 dark:border-slate-700 p-3 text-center text-xs text-gray-400 dark:text-slate-500 flex items-center justify-center gap-2">
               <Shield className="w-3.5 h-3.5" /> Secured by PayHere Innovation · PCI DSS Compliant
             </div>
+          </div>
+        </div>
+      )}
+      {/* ══════════════════════════════════ INTELLIGENT SUGGESTER MODAL ══════════ */}
+      {suggesterModalSlot && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/70 backdrop-blur-md animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-3xl shadow-2xl border border-gray-200 dark:border-slate-700 overflow-hidden relative">
+            <button onClick={() => setSuggesterModalSlot(null)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-800 dark:hover:text-white bg-gray-100 dark:bg-slate-800 p-2 rounded-full transition z-10"><X className="w-5 h-5" /></button>
+            
+            <div className="p-8">
+              <div className="w-16 h-16 bg-orange-100 dark:bg-orange-900/30 rounded-full flex items-center justify-center mb-5">
+                <AlertTriangle className="w-8 h-8 text-orange-600 dark:text-orange-400" />
+              </div>
+              <h3 className="text-2xl font-black text-textPrimary dark:text-white mb-2">Slot {suggesterModalSlot.label} is Unavailable</h3>
+              <p className="text-textSecondary dark:text-slate-400 mb-6 text-sm leading-relaxed">
+                Someone else has already reserved this slot. But don't worry! Our AI found {altVenues.length} alternative {venue.type} venues nearby that are highly rated.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {altVenues.map(v => (
+                  <Link key={v.id} to={`/venue/${v.id}`} onClick={() => setSuggesterModalSlot(null)}
+                    className="flex items-center gap-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 p-3 rounded-2xl group hover:border-accent hover:shadow-md transition">
+                    <img src={imgSrc(v.img)} alt={v.name} className="w-16 h-16 object-cover rounded-xl" />
+                    <div>
+                      <h4 className="font-bold text-textPrimary dark:text-white text-sm group-hover:text-accent transition line-clamp-1">{v.name}</h4>
+                      <div className="text-xs text-textSecondary dark:text-slate-400 mt-1 mb-1">{v.location}</div>
+                      <div className="text-xs font-bold text-primary dark:text-white flex items-center gap-1">
+                        <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" /> {v.rating} <span className="opacity-50 ml-1">· {v.price}</span>
+                      </div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+
+              {altVenues.length === 0 && (
+                <div className="p-4 bg-gray-50 dark:bg-slate-800 rounded-xl text-center text-sm text-textSecondary dark:text-slate-400">
+                  We couldn't find any close matches right now. Please select another time slot.
+                </div>
+              )}
+            </div>
+            <div className="bg-gradient-to-r from-accent to-orange-400 p-4 text-center">
+              <span className="text-white text-xs font-bold tracking-widest uppercase flex items-center justify-center gap-1.5"><Sparkles className="w-4 h-4" /> AI Powered Suggestion</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ REVIEW FORM MODAL ══════════════════════════════════════════════════ */}
+      {reviewFormOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/70 backdrop-blur-md animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl shadow-2xl border border-gray-200 dark:border-slate-700 overflow-hidden relative">
+            <div className="p-6 text-white flex justify-between items-center" style={{ background: 'var(--grad-nav)' }}>
+              <div className="flex items-center gap-3">
+                <Sparkles className="w-6 h-6" />
+                <h3 className="text-xl font-black">Share Your Experience</h3>
+              </div>
+              <button onClick={() => setReviewFormOpen(false)} className="text-white/70 hover:text-white p-1 rounded-lg hover:bg-white/10 transition">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <form onSubmit={submitReview} className="p-8 space-y-6">
+              <div className="text-center">
+                <p className="text-xs font-black uppercase text-textSecondary dark:text-slate-500 tracking-widest mb-4">How was your session at {venue.name}?</p>
+                <div className="flex justify-center gap-3">
+                  {[1,2,3,4,5].map(s => (
+                    <button 
+                      key={s} type="button" 
+                      onClick={() => setReviewData(p => ({ ...p, rating: s }))}
+                      className="group transition transform active:scale-90"
+                    >
+                      <Star 
+                        className={`w-12 h-12 transition-all duration-300 ${s <= reviewData.rating ? 'text-yellow-400 fill-yellow-400 drop-shadow-lg scale-110' : 'text-gray-200 dark:text-slate-700 hover:text-yellow-200'}`} 
+                      />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-textSecondary mb-2">Headline (Optional)</label>
+                  <input 
+                    type="text" 
+                    placeholder="Briefly describe your highlight..."
+                    value={reviewData.title}
+                    onChange={e => setReviewData(p => ({ ...p, title: e.target.value }))}
+                    className="form-field"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-textSecondary mb-2">Detailed Comments</label>
+                  <textarea 
+                    rows={4} 
+                    required
+                    placeholder="Tell other players about the pitch quality, facilities, or atmosphere..."
+                    value={reviewData.comment}
+                    onChange={e => setReviewData(p => ({ ...p, comment: e.target.value }))}
+                    className="form-field resize-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <button 
+                  type="button" onClick={() => setReviewFormOpen(false)}
+                  className="flex-1 py-4 rounded-2xl bg-gray-50 dark:bg-slate-800 text-textSecondary dark:text-slate-400 font-bold hover:bg-gray-100 transition"
+                >
+                  Discard
+                </button>
+                <button 
+                  type="submit" 
+                  className="btn-fire flex-1 py-4 rounded-2xl font-black text-sm transition-all"
+                >
+                  Publish Experience →
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -1,8 +1,9 @@
 import React, { useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useConnect } from '../context/ConnectContext';
 import { ArrowLeft, Upload, MapPin, DollarSign, Tag, FileText, X, ImagePlus, CheckCircle } from 'lucide-react';
 import { COLOMBO_LOCATIONS, ALL_TYPES } from '../data/mockData';
+import { imgSrc } from '../utils/api';
 
 const FACILITY_MAP = {
   Cricket:          ['Indoor Net', 'Outdoor Net', 'Ground with all facilities'],
@@ -10,7 +11,6 @@ const FACILITY_MAP = {
   Futsal:           ['Indoor Court', 'Outdoor Court'],
   Basketball:       ['Indoor Court', 'Outdoor Court'],
   Badminton:        ['Indoor Court'],
-  Tennis:           ['Indoor Court', 'Outdoor Court', 'Clay Court', 'Grass Court'],
   Swimming:         ['Indoor Pool', 'Outdoor Pool'],
   'Music Studio':   ['Studio Room', 'Hall'],
   'Music Practice': ['Studio Room', 'Hall'],
@@ -27,16 +27,41 @@ function Activity({ className }) {
   );
 }
 
-export default function AddVenue() {
+export default function EditVenue() {
   const navigate  = useNavigate();
-  const { addVenue, currentUser } = useConnect();
+  const { id }    = useParams();
+  const { updateVenue, currentUser, venues } = useConnect();
+  
+  const venueToEdit = venues.find(v => v.id == id);
+
   const fileInputRef = useRef(null);
   const docInputRef  = useRef(null);
 
   const [fields, setFields] = useState({
-    name: '', type: '', facilityType: '', location: '', fullAddress: '', price: '', matchPrice: '', description: '', capacity: 10, amenities: '',
+    name: venueToEdit?.name || '', 
+    type: venueToEdit?.type || '', 
+    facilityType: venueToEdit?.facilityType || '', 
+    location: venueToEdit?.location || '', 
+    price: venueToEdit?.priceNum || '', 
+    matchPrice: venueToEdit?.matchPrice || '',
+    description: venueToEdit?.description || '', 
+    capacity: venueToEdit?.capacity || 10, 
+    fullAddress: venueToEdit?.fullAddress || '',
+    amenities: Array.isArray(venueToEdit?.amenities) ? venueToEdit.amenities.join(', ') : (venueToEdit?.amenities || ''),
+    blockedSlots: (venueToEdit?.blockedSlots || []).join(', '),
   });
-  const [previewFiles, setPreviewFiles] = useState([]); // [{ url, file }]
+
+  // Initial photos from the venue
+  const [previewFiles, setPreviewFiles] = useState(() => {
+    const existing = [];
+    if (venueToEdit?.img) existing.push({ url: imgSrc(venueToEdit.img), dbPath: venueToEdit.img, existing: true });
+    if (Array.isArray(venueToEdit?.gallery)) {
+      venueToEdit.gallery.forEach(g => {
+        if (g && g !== venueToEdit.img) existing.push({ url: imgSrc(g), dbPath: g, existing: true });
+      });
+    }
+    return existing;
+  }); // [{ url, file, dbPath, existing: bool }]
   const [verificationFile, setVerificationFile] = useState(null);
   const [docType, setDocType] = useState('NIC'); // 'NIC' or 'BR'
 
@@ -56,7 +81,7 @@ export default function AddVenue() {
       setError('Maximum 8 photos allowed.');
       return;
     }
-    const previews = newFiles.map(f => ({ url: URL.createObjectURL(f), file: f }));
+    const previews = newFiles.map(f => ({ url: URL.createObjectURL(f), file: f, existing: false }));
     setPreviewFiles(prev => [...prev, ...previews]);
     setError('');
   };
@@ -68,20 +93,22 @@ export default function AddVenue() {
   // ── Submit ──────────────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (previewFiles.length === 0) { setError('Please upload at least one venue photo.'); return; }
+    if (previewFiles.length === 0) { setError('Please have at least one venue photo.'); return; }
     setLoading(true);
     setError('');
 
-    const fd = new FormData();
-    Object.entries(fields).forEach(([k, v]) => fd.append(k, v));
-    previewFiles.forEach(p => fd.append('images', p.file));
-    if (verificationFile) {
-      fd.append('verificationDoc', verificationFile);
-      fd.append('docType', docType);
-    }
-    fd.append('ownerId', currentUser?.id);
+    // Separate existing paths (the relative ones from db) from new file objects
+    const existingPhotosPaths = previewFiles.filter(p => p.existing).map(p => p.dbPath);
+    const newFileObjects = previewFiles.filter(p => !p.existing).map(p => p.file);
 
-    const result = await addVenue(fd);
+    // Prepare payload
+    const updates = { 
+      ...fields,
+      img: existingPhotosPaths[0] || null,
+      gallery: existingPhotosPaths,
+    };
+
+    const result = await updateVenue(id, updates, newFileObjects); 
     setLoading(false);
     if (result) {
       setSuccess(true);
@@ -118,7 +145,7 @@ export default function AddVenue() {
           {/* Header */}
           <div className="bg-primary p-8 text-white relative overflow-hidden">
             <div className="relative z-10">
-              <h1 className="text-3xl font-black mb-2">Add New Venue</h1>
+              <h1 className="text-3xl font-black mb-2">Edit Venue</h1>
               <p className="text-blue-100 opacity-90">Fill in the details to list your venue on Connect.</p>
             </div>
             <div className="absolute -right-20 -top-20 w-64 h-64 bg-white/10 rounded-full blur-3xl" />
@@ -307,6 +334,20 @@ export default function AddVenue() {
               />
             </div>
 
+            {/* Blocked Scheduling */}
+            <div className="space-y-2 bg-red-50 dark:bg-red-900/10 p-5 rounded-2xl border border-red-200 dark:border-red-900/30">
+              <label className="text-sm font-bold text-red-600 dark:text-red-400 flex items-center gap-2">
+                <X className="w-4 h-4 text-red-500" /> Blocked Calendar Hours
+              </label>
+              <input
+                type="text" name="blockedSlots" value={fields.blockedSlots || ''} 
+                onChange={(e) => setFields(prev => ({ ...prev, blockedSlots: e.target.value }))}
+                placeholder="e.g. 06, 12, 18 (comma separated 24H formats)"
+                className="w-full px-4 py-3 rounded-xl border border-red-200 dark:border-red-800 bg-white dark:bg-slate-800 text-textPrimary dark:text-white focus:ring-2 focus:ring-red-500 outline-none transition"
+              />
+              <p className="text-xs text-red-500/80 font-medium">Use comma separated 24H format to block out specific hours globally across all days (useful for maintenance or private hours).</p>
+            </div>
+
             {/* Description */}
             <div className="space-y-2">
               <label className="text-sm font-bold text-textPrimary dark:text-slate-200 flex items-center gap-2">
@@ -320,65 +361,8 @@ export default function AddVenue() {
               />
             </div>
 
-            {/* ── Business Verification ─────────────────────────────────────────── */}
-            <div className="pt-6 border-t border-gray-100 dark:border-slate-700">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-lg font-black text-textPrimary dark:text-white">Business Verification</h3>
-                  <p className="text-xs text-textSecondary dark:text-slate-400">Upload identity docs for automated instant approval.</p>
-                </div>
-                <div className="flex bg-gray-100 dark:bg-slate-700 p-1 rounded-lg">
-                  <button 
-                    type="button" 
-                    onClick={() => setDocType('NIC')}
-                    className={`px-3 py-1 text-[10px] font-black rounded-md transition-all ${docType === 'NIC' ? 'bg-accent text-white shadow-sm' : 'text-gray-500'}`}
-                  >NIC</button>
-                  <button 
-                    type="button" 
-                    onClick={() => setDocType('BR')}
-                    className={`px-3 py-1 text-[10px] font-black rounded-md transition-all ${docType === 'BR' ? 'bg-accent text-white shadow-sm' : 'text-gray-500'}`}
-                  >BUSINESS REG</button>
-                </div>
-              </div>
-
-              <div 
-                onClick={() => docInputRef.current?.click()}
-                className={`relative border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all group ${verificationFile ? 'border-success bg-success/5' : 'border-gray-300 dark:border-slate-600 hover:border-accent hover:bg-accent/5'}`}
-              >
-                <input 
-                  ref={docInputRef} type="file" accept="image/*,.pdf" className="hidden" 
-                  onChange={(e) => {
-                    const file = e.target.files[0];
-                    if (file) setVerificationFile(file);
-                  }}
-                />
-                
-                {verificationFile ? (
-                  <div className="flex items-center justify-center gap-3">
-                    <div className="w-12 h-12 bg-success/20 rounded-lg flex items-center justify-center">
-                      <FileText className="w-6 h-6 text-success" />
-                    </div>
-                    <div className="text-left">
-                      <p className="text-sm font-bold text-success capitalize">{docType} Document Attached</p>
-                      <p className="text-xs text-gray-500 truncate max-w-[200px]">{verificationFile.name}</p>
-                    </div>
-                    <button 
-                      type="button" 
-                      onClick={(e) => { e.stopPropagation(); setVerificationFile(null); }}
-                      className="ml-auto p-1.5 hover:bg-red-100 text-red-500 rounded-lg transition"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <Upload className="w-6 h-6 text-gray-400 group-hover:text-accent mx-auto mb-2" />
-                    <p className="text-[13px] font-bold text-textSecondary dark:text-slate-400">Click to upload {docType} document</p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">Clear scan of your {docType === 'NIC' ? 'National ID Card' : 'Registration Certificate'}</p>
-                  </>
-                )}
-              </div>
-            </div>
+            {/* ── Business Verification (Hidden for edits) ─────────────────────────── */}
+            {/* Owners only need to verify once during creation */}
 
             {error && (
               <p className="text-sm text-error font-semibold flex items-center gap-1">
@@ -397,7 +381,7 @@ export default function AddVenue() {
                     <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     Publishing…
                   </>
-                ) : <>Publish Venue Listing</>}
+                ) : <>Saving Venue Edits</>}
               </button>
               <button
                 type="button" onClick={() => navigate('/owner-dashboard')}

@@ -1,10 +1,16 @@
 import { useState, useMemo, useEffect } from 'react';
 import {
   Activity, Plus, TrendingUp, Users, X, AlertTriangle, CheckCircle,
-  Edit2, Eye, Clock, ToggleLeft, ToggleRight, Calendar, ChevronDown, ChevronUp
+  Edit2, Eye, Clock, ToggleLeft, ToggleRight, Calendar, ChevronDown, ChevronUp, BarChart3
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useConnect } from '../context/ConnectContext';
+import { platformApi } from '../utils/api';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend, AreaChart, Area
+} from 'recharts';
+import { imgSrc } from '../utils/api';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const StatusBadge = ({ status }) => {
@@ -12,18 +18,31 @@ const StatusBadge = ({ status }) => {
     Confirmed: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
     Cancelled: 'bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400',
     Edited:    'bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400',
+    Approved:  'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400',
+    Pending:   'bg-yellow-100 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400',
+    Rejected:  'bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400',
   };
   return (
     <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full inline-block ${styles[status] || styles.Confirmed}`}>
-      {status}
+      {status === 'Pending' ? 'Under Review' : (status === 'Approved' ? 'Open' : status)}
     </span>
   );
 };
 
+
 const timeLabel = (slots) => {
   if (!slots) return '—';
-  const arr = Array.isArray(slots) ? slots : [slots];
-  return arr.sort().map(h => `${h}:00`).join(', ');
+  let arr = slots;
+  if (typeof slots === 'string') {
+    try {
+      if (slots.startsWith('[')) arr = JSON.parse(slots);
+      else arr = slots.split(',');
+    } catch (e) {
+      arr = [slots];
+    }
+  }
+  if (!Array.isArray(arr)) arr = [arr];
+  return arr.sort().map(h => `${String(h).trim().replace(/"/g, '')}:00`).join(', ');
 };
 
 // ── ALL_TYPES from mockData for edit modal dropdown ───────────────────────────
@@ -32,6 +51,18 @@ const ALL_TYPES = ['Cricket','Football','Futsal','Basketball','Badminton','Swimm
 function OwnerDashboard() {
   const navigate = useNavigate();
   const { venues, bookings, currentUser, cancelBooking, deleteVenue, updateVenue, refreshVenues, refreshBookings } = useConnect();
+
+  // ── Role Guard: Only owners can see this ──────────────────────────────────
+  useEffect(() => {
+    if (!currentUser) {
+      navigate('/login', { replace: true });
+      return;
+    }
+    if (currentUser.role === 'user') {
+      navigate('/customer-dashboard', { replace: true });
+    }
+  }, [currentUser, navigate]);
+
 
   // ── Local state ────────────────────────────────────────────────────────────
   const [activeTab,         setActiveTab]         = useState('daily');
@@ -53,14 +84,23 @@ function OwnerDashboard() {
 
   const todayStr   = new Date().toISOString().split('T')[0];
   const dailyBookings   = useMemo(() => myBookings.filter(b => b.date === todayStr && b.status !== 'Cancelled'), [myBookings, todayStr]);
+  const upcomingBookings = useMemo(() => myBookings.filter(b => b.date > todayStr && b.status !== 'Cancelled'), [myBookings, todayStr]);
   const historyBookings = useMemo(() => myBookings.filter(b => b.date < todayStr || b.status === 'Cancelled'), [myBookings, todayStr]);
-  const upcomingBookings = useMemo(() => myBookings.filter(b => b.date >= todayStr && b.status === 'Confirmed'), [myBookings, todayStr]);
 
   const stats = useMemo(() => ({
     revenue: myBookings.filter(b => b.status === 'Confirmed').reduce((s, b) => s + (b.totalPrice || 0), 0),
     active:  upcomingBookings.length,
     views:   myVenues.reduce((s, v) => s + (v.views || 0), 0),
   }), [myBookings, myVenues, upcomingBookings]);
+
+  const [ownerAnalytics, setOwnerAnalytics] = useState(null);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    platformApi.get('/venues/owner/analytics')
+      .then(r => setOwnerAnalytics(r.data))
+      .catch(() => {});
+  }, [currentUser, bookings, venues]); // refetch when data changes
 
   // ── Cancel booking ─────────────────────────────────────────────────────────
   const openCancelModal = (booking) => {
@@ -85,6 +125,7 @@ function OwnerDashboard() {
       description:   venue.description || '',
       price:         venue.priceNum || '',
       location:      venue.location,
+      fullAddress:   venue.fullAddress || '',
       isClosed:      venue.isClosed || false,
       closureReason: venue.closureReason || '',
     });
@@ -98,6 +139,7 @@ function OwnerDashboard() {
       priceNum:      parseFloat(editFields.price) || 0,
       price:         `LKR ${editFields.price}/hr`,
       location:      editFields.location,
+      fullAddress:   editFields.fullAddress,
       isClosed:      editFields.isClosed,
       closureReason: editFields.closureReason,
     });
@@ -107,7 +149,10 @@ function OwnerDashboard() {
   };
 
   // ── Which bookings to show ─────────────────────────────────────────────────
-  const displayedBookings = activeTab === 'daily' ? dailyBookings : historyBookings;
+  const displayedBookings = 
+    activeTab === 'daily'    ? dailyBookings : 
+    activeTab === 'upcoming' ? upcomingBookings : 
+    historyBookings;
 
   // ── Booking row component ──────────────────────────────────────────────────
   const BookingRow = ({ b }) => {
@@ -142,6 +187,14 @@ function OwnerDashboard() {
         {isExpanded && (
           <div className="px-5 pb-5 pt-0 animate-fade-in">
             <div className="bg-gray-50 dark:bg-slate-900/50 rounded-2xl p-4 space-y-2 text-sm">
+              <div className="flex justify-between border-b border-gray-200/50 dark:border-slate-700/50 pb-2 mb-2">
+                <span className="text-[10px] font-black uppercase text-accent">Customer Details</span>
+              </div>
+              <div className="flex justify-between"><span className="text-textSecondary dark:text-slate-400">Name</span><span className="font-bold dark:text-white uppercase text-[11px]">{b.customerName || (b.User ? `${b.User.firstName} ${b.User.lastName}` : 'Guest')}</span></div>
+              <div className="flex justify-between"><span className="text-textSecondary dark:text-slate-400">Email</span><span className="font-medium dark:text-white">{b.customerEmail || b.User?.email || '—'}</span></div>
+              <div className="flex justify-between"><span className="text-textSecondary dark:text-slate-400">Phone</span><span className="font-bold text-primary dark:text-accent">{b.customerPhone || '—'}</span></div>
+              <hr className="border-gray-200/50 dark:border-slate-700/50 my-2" />
+              
               <div className="flex justify-between"><span className="text-textSecondary dark:text-slate-400">Booking ID</span><span className="font-mono text-xs dark:text-white">#{b.id}</span></div>
               <div className="flex justify-between"><span className="text-textSecondary dark:text-slate-400">Venue</span><span className="font-medium dark:text-white">{b.venueName || b.Venue?.name}</span></div>
               <div className="flex justify-between"><span className="text-textSecondary dark:text-slate-400">Date</span><span className="font-medium dark:text-white">{b.date}</span></div>
@@ -187,21 +240,91 @@ function OwnerDashboard() {
           </button>
         </div>
 
-          {/* ── Stats ───────────────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+          {/* ── Stats ──────────────────────────────────────────────────────────── */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-5 mb-8">
           {[
-            { icon: <TrendingUp className="w-8 h-8 text-primary dark:text-blue-400" />, bg: 'bg-primary/10', label: 'Total Revenue', value: `LKR ${stats.revenue.toLocaleString()}` },
-            { icon: <Activity className="w-8 h-8 text-accent" />, bg: 'bg-accent/10', label: 'Upcoming Bookings', value: stats.active },
-            { icon: <Users className="w-8 h-8 text-green-500" />, bg: 'bg-green-500/10', label: 'Profile Views', value: stats.views.toLocaleString() },
+            { icon: TrendingUp, color: 'text-indigo-500',  label: 'Total Revenue',      value: `LKR ${stats.revenue.toLocaleString()}`,  sub: 'Confirmed bookings' },
+            { icon: Calendar,   color: 'text-emerald-500', label: 'Upcoming Bookings', value: stats.active,                             sub: 'Not yet occurred' },
+            { icon: Eye,        color: 'text-violet-500',  label: 'Profile Views',      value: stats.views.toLocaleString(),             sub: 'Across all venues' },
+            { icon: Activity,   color: 'text-orange-500',  label: 'Total Bookings',    value: myBookings.length,                        sub: 'All time' },
           ].map((s, i) => (
-            <div key={i} className="bg-white dark:bg-slate-800 p-8 rounded-2xl border border-border dark:border-slate-700 shadow-sm flex items-center gap-6 group hover:shadow-md transition animate-fade-in-up" style={{ animationDelay: `${i * 100}ms` }}>
-              <div className={`p-4 ${s.bg} rounded-2xl group-hover:scale-110 transition`}>{s.icon}</div>
-              <div>
-                <p className="text-xs text-textSecondary dark:text-slate-400 font-black uppercase tracking-widest mb-1">{s.label}</p>
-                <h3 className="text-3xl font-black text-textPrimary dark:text-white">{s.value}</h3>
+            <div key={i} className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm hover:shadow-md transition-all">
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-[11px] font-bold text-gray-400 dark:text-slate-500 uppercase tracking-[0.15em]">{s.label}</div>
+                <s.icon className={`w-5 h-5 ${s.color}`} />
               </div>
+              <div className="text-3xl font-black text-gray-900 dark:text-white tracking-tighter">{s.value}</div>
+              <div className="text-[11px] text-gray-400 dark:text-slate-500 mt-1 font-medium">{s.sub}</div>
             </div>
           ))}
+        </div>
+
+        {/* ── Analytics Charts ─────────────────────────────────────────────── */}
+        <div className="space-y-6 mb-10">
+
+          {/* Row 1: Revenue Trend + Booking Status */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-100 dark:border-slate-700 p-6 shadow-sm">
+              <h3 className="text-xs font-black text-gray-500 dark:text-slate-400 uppercase tracking-widest mb-5">Monthly Revenue Trend (LKR)</h3>
+              <ResponsiveContainer width="100%" height={200}>
+                <AreaChart data={ownerAnalytics?.monthlyData || []}>
+                  <defs>
+                    <linearGradient id="ownerRevGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+                  <Tooltip formatter={(v) => [`LKR ${v.toLocaleString()}`, 'Revenue']} contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontSize: 12 }} />
+                  <Area type="monotone" dataKey="revenue" stroke="#6366f1" strokeWidth={2.5} fill="url(#ownerRevGrad)" dot={{ r: 4, fill: '#6366f1' }} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-100 dark:border-slate-700 p-6 shadow-sm">
+              <h3 className="text-xs font-black text-gray-500 dark:text-slate-400 uppercase tracking-widest mb-5">Booking Status Breakdown</h3>
+              <ResponsiveContainer width="100%" height={200}>
+                <PieChart>
+                  <Pie data={ownerAnalytics?.bookingStatusData?.filter(d=>d.value>0) || []} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={3} dataKey="value">
+                    {(ownerAnalytics?.bookingStatusData || []).map((_, i) => <Cell key={i} fill={['#10b981','#ef4444','#a78bfa'][i]} />)}
+                  </Pie>
+                  <Tooltip contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontSize: 12 }} />
+                  <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Row 2: Revenue per Venue + Monthly Bookings */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-100 dark:border-slate-700 p-6 shadow-sm">
+              <h3 className="text-xs font-black text-gray-500 dark:text-slate-400 uppercase tracking-widest mb-5">Revenue per Venue (LKR)</h3>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={ownerAnalytics?.revenueByVenueData || []} barSize={24}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+                  <Tooltip formatter={(v) => [`LKR ${v.toLocaleString()}`, 'Revenue']} contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontSize: 12 }} />
+                  <Bar dataKey="revenue" fill="#f97316" radius={[6, 6, 0, 0]} name="Revenue" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-100 dark:border-slate-700 p-6 shadow-sm">
+              <h3 className="text-xs font-black text-gray-500 dark:text-slate-400 uppercase tracking-widest mb-5">Monthly Bookings (Last 6 Months)</h3>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={ownerAnalytics?.monthlyData || []} barSize={24}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <Tooltip contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontSize: 12 }} />
+                  <Bar dataKey="bookings" fill="#10b981" radius={[6, 6, 0, 0]} name="Bookings" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
@@ -217,20 +340,20 @@ function OwnerDashboard() {
               ) : (
                 <table className="w-full text-left border-collapse">
                   <thead>
-                    <tr className="bg-gray-50/50 dark:bg-slate-900 border-b border-border dark:border-slate-700 text-xs font-black text-textSecondary dark:text-slate-400 uppercase tracking-tighter">
-                      <th className="p-4">Venue</th>
-                      <th className="p-4">Price</th>
-                      <th className="p-4">Status</th>
-                      <th className="p-4 text-right">Actions</th>
+                    <tr className="bg-gray-50/50 dark:bg-slate-900 border-b border-border dark:border-slate-700 text-[10px] font-black text-textSecondary dark:text-slate-400 uppercase tracking-widest">
+                      <th className="p-4 px-6 text-left">Venue</th>
+                      <th className="p-4 text-left">Price</th>
+                      <th className="p-4 px-6 text-left">Status</th>
+                      <th className="p-4 text-right px-6">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {myVenues.map(v => (
-                      <tr key={v.id} className="border-b border-border dark:border-slate-700 hover:bg-gray-50/50 dark:hover:bg-slate-900/40 transition">
-                        <td className="p-4">
+                      <tr key={v.id} className="hover:bg-gray-50 dark:hover:bg-slate-900/40 transition-colors">
+                        <td className="p-4 px-6">
                           <div className="flex items-center gap-3">
                             <img
-                              src={v.img || 'https://images.unsplash.com/photo-1518604666860-9ed391f76460?auto=format&fit=crop&q=80'}
+                              src={v.img ? imgSrc(v.img) : 'https://images.unsplash.com/photo-1518604666860-9ed391f76460?auto=format&fit=crop&q=80'}
                               className="w-12 h-12 rounded-xl object-cover shadow-sm"
                               alt={v.name}
                             />
@@ -241,24 +364,28 @@ function OwnerDashboard() {
                           </div>
                         </td>
                         <td className="p-4 text-sm font-bold dark:text-slate-300">{v.price}</td>
-                        <td className="p-4">
-                          {v.isClosed ? (
-                            <span className="bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-[10px] font-black px-2 py-1 rounded-full uppercase tracking-widest whitespace-nowrap">
+                        <td className="p-4 px-6">
+                          {v.status === 'Pending' ? (
+                            <span className="bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest whitespace-nowrap shadow-sm">
+                              Pending Approval
+                            </span>
+                          ) : (v.isClosed ? (
+                            <span className="bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest whitespace-nowrap shadow-sm">
                               Closed
                             </span>
                           ) : (
-                            <span className="bg-success text-white text-[10px] font-black px-2 py-1 rounded-full uppercase tracking-widest whitespace-nowrap">
+                            <span className="bg-success text-white text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest whitespace-nowrap shadow-sm">
                               Open
                             </span>
-                          )}
+                          ))}
                         </td>
                         <td className="p-4 text-right whitespace-nowrap">
-                          <button
-                            onClick={() => openEditVenue(v)}
+                          <Link
+                            to={`/edit-venue/${v.id}`}
                             className="text-blue-500 hover:text-blue-700 dark:text-blue-400 text-xs font-black mr-3 uppercase transition flex items-center gap-1 inline-flex"
                           >
-                            <Edit2 className="w-3 h-3" /> Edit
-                          </button>
+                            <Edit2 className="w-3 h-3" /> Edit / Block Dates
+                          </Link>
                           <button
                             onClick={async () => { if (window.confirm(`Delete ${v.name}?`)) await deleteVenue(v.id); }}
                             className="text-error hover:text-red-700 dark:text-red-400 text-xs font-black uppercase transition"
@@ -278,8 +405,9 @@ function OwnerDashboard() {
           <div className="bg-white dark:bg-slate-800 rounded-2xl border border-border dark:border-slate-700 shadow-sm overflow-hidden h-fit">
             <div className="flex border-b border-border dark:border-slate-700">
               {[
-                { key: 'daily',   label: `Today (${dailyBookings.length})` },
-                { key: 'history', label: 'History' },
+                { key: 'daily',    label: `Today (${dailyBookings.length})` },
+                { key: 'upcoming', label: `Upcoming (${upcomingBookings.length})` },
+                { key: 'history',  label: 'History' },
               ].map(t => (
                 <button
                   key={t.key}
@@ -293,7 +421,9 @@ function OwnerDashboard() {
             <div>
               {displayedBookings.length === 0 ? (
                 <div className="p-10 text-center text-textSecondary dark:text-slate-500 italic">
-                  {activeTab === 'daily' ? 'No bookings for today.' : 'No booking history yet.'}
+                  {activeTab === 'daily' ? 'No bookings for today.' : 
+                   activeTab === 'upcoming' ? 'No upcoming bookings found.' : 
+                   'No booking history yet.'}
                 </div>
               ) : (
                 <div>
@@ -348,6 +478,18 @@ function OwnerDashboard() {
                   value={editFields.description}
                   onChange={e => setEditFields(p => ({ ...p, description: e.target.value }))}
                   className="form-field resize-none"
+                />
+              </div>
+
+              {/* Full Address */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wide text-gray-600 dark:text-slate-400 mb-1.5">Full Street Address (for Mapping)</label>
+                <textarea
+                  rows={2}
+                  value={editFields.fullAddress}
+                  onChange={e => setEditFields(p => ({ ...p, fullAddress: e.target.value }))}
+                  className="form-field resize-none"
+                  placeholder="e.g. 123 Main St, Colombo 07"
                 />
               </div>
 

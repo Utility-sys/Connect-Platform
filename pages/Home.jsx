@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Search, MapPin, Star, Sparkles, ArrowRight, Clock, Shield, Zap } from 'lucide-react';
 import { useConnect } from '../context/ConnectContext';
+import { imgSrc } from '../utils/api';
 
 // ── Category config ──────────────────────────────────────────────────────────
 const ACTIVITY_CATEGORIES = [
@@ -15,14 +16,14 @@ const ACTIVITY_CATEGORIES = [
   {
     label: 'Futsal',
     type: 'Futsal',
-    img: 'https://images.unsplash.com/photo-1543326727-cf6c39e8f84c?auto=format&fit=crop&q=80',
+    img: '/futsal-uploaded.jpg',
     color: 'from-sky-900/80 to-sky-700/60',
     badge: 'bg-sky-500/90',
   },
   {
     label: 'Football',
     type: 'Football',
-    img: 'https://images.unsplash.com/photo-1518605368461-1ee7c58ed83e?auto=format&fit=crop&q=80',
+    img: 'https://images.unsplash.com/photo-1543326727-cf6c39e8f84c?auto=format&fit=crop&q=80',
     color: 'from-blue-900/80 to-blue-700/60',
     badge: 'bg-blue-500/90',
   },
@@ -82,8 +83,9 @@ export default function Home() {
   const [searchLocation, setSearchLocation] = useState('');
 
   const featuredVenues = useMemo(() => 
-    [...venues].sort((a, b) => b.rating - a.rating).slice(0, 3)
+    [...(venues || [])].filter(v => v.status === 'Approved').sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 3)
   , [venues]);
+
 
   const handleSearch = () => {
     navigate(`/search?query=${encodeURIComponent(searchQuery)}&loc=${encodeURIComponent(searchLocation)}`);
@@ -106,6 +108,8 @@ export default function Home() {
           {/* Professional Overlay: Deep blue to transparent for text clarity */}
           <div className="absolute inset-0 bg-gradient-to-r from-slate-900/95 via-slate-900/70 to-transparent" />
           <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-transparent to-slate-900/40" />
+          {/* Visible Motion Blends */}
+          <div className="absolute inset-0 bg-accent/40 mix-blend-overlay animate-pulse" style={{ animationDuration: '1.5s' }} />
         </div>
 
         <div className="relative z-10 max-w-7xl mx-auto px-6 sm:px-10 text-white w-full py-24">
@@ -122,7 +126,7 @@ export default function Home() {
 
             {/* Headline */}
             <h1 className="text-6xl sm:text-7xl lg:text-8xl font-black leading-[1.1] mb-8 animate-fade-in-up delay-100 tracking-tight">
-              elevate your<br />
+              Elevate your<br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-accent to-orange-400">
                 Experience
               </span>
@@ -192,9 +196,6 @@ export default function Home() {
         <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-12">
           {FEATURES.map((f, i) => (
             <div key={i} className="flex flex-col items-center text-center animate-fade-in-up" style={{ animationDelay: `${i * 100}ms` }}>
-              <div className="w-14 h-14 bg-gray-50 dark:bg-slate-800 rounded-2xl flex items-center justify-center mb-5 group-hover:scale-110 transition border border-gray-100 dark:border-slate-700">
-                {f.icon}
-              </div>
               <h4 className="text-lg font-black text-textPrimary dark:text-white mb-2">{f.title}</h4>
               <p className="text-sm text-textSecondary dark:text-slate-400 leading-relaxed">{f.desc}</p>
             </div>
@@ -216,7 +217,7 @@ export default function Home() {
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-5">
           {ACTIVITY_CATEGORIES.map((cat, i) => {
-            const count = venues.filter(v => v.type === cat.type).length;
+            const count = (venues || []).filter(v => v.type === cat.type && v.status === 'Approved').length;
             return (
               <Link
                 key={cat.type}
@@ -281,7 +282,7 @@ export default function Home() {
                   style={{ animationDelay: `${i * 100}ms` }}
                 >
                   <div className="h-64 relative overflow-hidden">
-                    <img src={venue.img} alt={venue.name} className="w-full h-full object-cover group-hover:scale-110 transition duration-1000" />
+                    <img src={imgSrc(venue.img)} alt={venue.name} className="w-full h-full object-cover group-hover:scale-110 transition duration-1000" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
                     <div className="absolute top-4 right-4 bg-white/95 backdrop-blur-sm px-3 py-1.5 rounded-2xl text-[10px] font-black text-primary flex items-center gap-1 shadow-xl">
                       <Star className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500" /> {venue.rating}
