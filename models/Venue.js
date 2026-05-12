@@ -28,6 +28,11 @@ const Venue = sequelize.define('Venue', {
     type: DataTypes.STRING,
     allowNull: false
   },
+  // Full street address — shown only inside venue detail, not in search listings
+  fullAddress: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
   price: {
     type: DataTypes.STRING,
     allowNull: false
@@ -80,6 +85,37 @@ const Venue = sequelize.define('Venue', {
   },
   views: {
     type: DataTypes.INTEGER,
+    defaultValue: 0
+  },
+  status: {
+    type: DataTypes.ENUM('Pending', 'Approved', 'Rejected'),
+    defaultValue: 'Pending'
+  },
+  verificationDoc: {
+    type: DataTypes.TEXT, // URL to the NIC or Business Registration
+  },
+  docType: {
+    type: DataTypes.ENUM('NIC', 'BR'),
+    allowNull: true
+  },
+  confidenceScore: {
+    type: DataTypes.FLOAT,
+    defaultValue: 0
+  },
+  verificationAnalysis: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  capacity: {
+    type: DataTypes.INTEGER,
+    defaultValue: 10
+  },
+  amenities: {
+    type: DataTypes.JSON,
+    defaultValue: []
+  },
+  matchPrice: {
+    type: DataTypes.FLOAT,
     defaultValue: 0
   }
 });

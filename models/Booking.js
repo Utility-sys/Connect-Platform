@@ -23,6 +23,20 @@ const Booking = sequelize.define('Booking', {
   },
   customerName: {
     type: DataTypes.STRING,
+    defaultValue: 'Guest'
+  },
+  idempotencyKey: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    unique: true
+  },
+  customerEmail: {
+    type: DataTypes.STRING,
+    defaultValue: '—'
+  },
+  customerPhone: {
+    type: DataTypes.STRING,
+    defaultValue: '—'
   },
   ownerId: {
     type: DataTypes.STRING,
@@ -46,6 +60,10 @@ const Booking = sequelize.define('Booking', {
   cancellationReason: {
     type: DataTypes.STRING,
     allowNull: true
+  },
+  reminderSent: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
   }
 });
 
