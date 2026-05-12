@@ -25,24 +25,3 @@ services:
         value: 10000
       - key: NODE_ENV
         value: production
-        fromService:
-          name: connect-backend
-          type: web
-          property: url
-        suffix: /api
-
-  # 4. Connect Admin Dashboard
-  - type: web
-    name: connect-admin
-    env: static
-    plan: free
-    rootDir: connect-admin
-    buildCommand: npm install && npm run build
-    staticPublishDir: dist
-    envVars:
-      - key: VITE_API_BASE
-        fromService:
-          name: connect-backend
-          type: web
-          property: url
-        suffix: /api
