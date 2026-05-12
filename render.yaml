@@ -1,11 +1,11 @@
-services:
+databases:
   # 1. PostgreSQL Database
-  - type: database
-    name: connect-db
+  - name: connect-db
     plan: free
     databaseName: connect_db
     user: postgres
 
+services:
   # 2. Connect Backend API
   - type: web
     name: connect-backend
