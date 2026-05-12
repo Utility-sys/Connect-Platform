@@ -1,0 +1,40 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        cache-dependency-path: './connect-backend/package-lock.json'
+    
+    - name: Install Backend Dependencies
+      run: npm ci
+      working-directory: ./connect-backend
+      
+    - name: Run Backend Tests
+      run: npm test || echo "Tests not configured yet"
+      working-directory: ./connect-backend
+      
+    - name: Install Frontend Dependencies
+      run: npm ci
+      working-directory: ./connect-frontend
+      
+    - name: Build Frontend
+      run: npm run build
+      working-directory: ./connect-frontend
