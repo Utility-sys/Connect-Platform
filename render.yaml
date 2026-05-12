@@ -3,7 +3,6 @@ databases:
   - name: connect-db
     plan: free
     databaseName: connect_db
-    user: postgres
 
 services:
   # 2. Connect Full-Stack Platform
