@@ -71,8 +71,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // ── Sync DB then start server ──────────────────────────────────────────────────
-sequelize.sync()
-  .then(async () => {
+
     console.log('✅ Database synced');
 
     // ── Auto-seed on first boot if DB is empty ────────────────────────────────

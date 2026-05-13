@@ -246,6 +246,10 @@ export default function VenueDetail() {
   const [selectedDate, setSelectedDate] = useState(todayStr);
 
   const availableTimeSlots = useMemo(() => {
+    if (Array.isArray(venue?.blockedDates) && venue.blockedDates.includes(selectedDate)) {
+      return [];
+    }
+    
     let baseSlots = [...allTimeSlots];
 
     if (venue?.time && venue.time.toLowerCase() !== '24 hours') {
@@ -856,20 +860,23 @@ export default function VenueDetail() {
                           const dateStr = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
                           const isToday = dateStr === todayStr;
                           const isPast  = dateStr < todayStr;
+                          const isBlockedDate = Array.isArray(venue?.blockedDates) && venue.blockedDates.includes(dateStr);
                           const isSel   = selectedDate === dateStr;
                           return (
                             <button
                               key={day}
-                              disabled={isPast}
+                              disabled={isPast || isBlockedDate}
                               onClick={() => { setSelectedDate(dateStr); setSelectedSlots([]); }}
-                              className={`aspect-square rounded-full text-[10px] font-bold transition-all flex items-center justify-center
-                                ${isPast ? 'text-gray-300 dark:text-slate-700 cursor-not-allowed' :
+                              className={`aspect-square rounded-full text-[10px] font-bold transition-all flex items-center justify-center relative overflow-hidden
+                                ${isPast || isBlockedDate ? 'text-gray-300 dark:text-slate-700 cursor-not-allowed' :
                                   isSel ? 'bg-primary text-white shadow-lg scale-110 z-10' :
                                   isToday ? 'border-2 border-primary/40 text-primary dark:text-accent' :
                                   'hover:bg-white dark:hover:bg-slate-800 text-textSecondary dark:text-slate-400'
                                 }
                               `}
                             >
+                              {isBlockedDate && <div className="absolute inset-0 bg-red-500/10 dark:bg-red-500/20" />}
+                              {isBlockedDate && <div className="absolute w-full h-[1px] bg-red-400/50 -rotate-45" />}
                               {day}
                             </button>
                           );
