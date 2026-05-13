@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const API_BASE = '/api';
-export const IMG_BASE = typeof window !== 'undefined' ? window.location.origin : '';
+export const IMG_BASE = window.location.origin;
 
 export const imgSrc = (path) => {
   if (!path) return 'https://images.unsplash.com/photo-1518604666860-9ed391f76460?auto=format&fit=crop&q=80';
