@@ -83,6 +83,11 @@ const Venue = sequelize.define('Venue', {
     type: DataTypes.JSON,
     defaultValue: []
   },
+  // Specific dates entirely blocked (JSON array of YYYY-MM-DD strings)
+  blockedDates: {
+    type: DataTypes.JSON,
+    defaultValue: []
+  },
   views: {
     type: DataTypes.INTEGER,
     defaultValue: 0
