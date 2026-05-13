@@ -62,7 +62,7 @@ app.get('/', (_req, res) => res.send('<h1>Connect API is Active</h1><p>The backe
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', time: new Date() }));
 
 // ── Sync DB then start server ──────────────────────────────────────────────────
-sequelize.sync()
+sequelize.sync({ alter: true })
   .then(() => {
     console.log('✅ Database synced');
     const PORT = process.env.PORT || 5000;
