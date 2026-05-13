@@ -1,18 +1,17 @@
-services:
+databases:
   # 1. PostgreSQL Database
-  - type: database
-    name: connect-db
+  - name: connect-db
     plan: free
     databaseName: connect_db
-    user: postgres
 
-  # 2. Connect Backend API
+services:
+  # 2. Connect Full-Stack Platform
   - type: web
-    name: connect-backend
+    name: connect-platform
     env: node
     plan: free
-    rootDir: connect-backend
-    buildCommand: npm install
+    rootDir: .
+    buildCommand: npm install && npm run build
     startCommand: node server.js
     envVars:
       - key: DATABASE_URL
@@ -23,35 +22,5 @@ services:
         generateValue: true
       - key: PORT
         value: 10000
-
-  # 3. Connect Frontend (Main Site)
-  - type: web
-    name: connect-frontend
-    env: static
-    plan: free
-    rootDir: connect-frontend
-    buildCommand: npm install && npm run build
-    staticPublishDir: dist
-    envVars:
-      - key: VITE_API_BASE
-        fromService:
-          name: connect-backend
-          type: web
-          property: url
-        suffix: /api
-
-  # 4. Connect Admin Dashboard
-  - type: web
-    name: connect-admin
-    env: static
-    plan: free
-    rootDir: connect-admin
-    buildCommand: npm install && npm run build
-    staticPublishDir: dist
-    envVars:
-      - key: VITE_API_BASE
-        fromService:
-          name: connect-backend
-          type: web
-          property: url
-        suffix: /api
+      - key: NODE_ENV
+        value: production
