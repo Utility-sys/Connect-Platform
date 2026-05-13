@@ -16,6 +16,8 @@ const FACILITY_MAP = {
   'Music Practice': ['Studio Room', 'Hall'],
 };
 
+const HOURS_LIST = Array.from({length: 18}, (_, i) => String(i + 6).padStart(2, '0'));
+
 // ── Icon helper ────────────────────────────────────────────────────────────────
 function Activity({ className }) {
   return (
@@ -36,6 +38,7 @@ export default function EditVenue() {
 
   const fileInputRef = useRef(null);
   const docInputRef  = useRef(null);
+  const initialized  = useRef(false);
 
   const [fields, setFields] = useState({
     name: venueToEdit?.name || '', 
@@ -48,8 +51,45 @@ export default function EditVenue() {
     capacity: venueToEdit?.capacity || 10, 
     fullAddress: venueToEdit?.fullAddress || '',
     amenities: Array.isArray(venueToEdit?.amenities) ? venueToEdit.amenities.join(', ') : (venueToEdit?.amenities || ''),
-    blockedSlots: (venueToEdit?.blockedSlots || []).join(', '),
+    blockedSlots: Array.isArray(venueToEdit?.blockedSlots) ? venueToEdit.blockedSlots.join(', ') : (venueToEdit?.blockedSlots || ''),
+    blockedDates: Array.isArray(venueToEdit?.blockedDates) ? venueToEdit.blockedDates : [],
   });
+
+  React.useEffect(() => {
+    if (venueToEdit && !initialized.current) {
+      initialized.current = true;
+      setFields({
+        name: venueToEdit.name || '', 
+        type: venueToEdit.type || '', 
+        facilityType: venueToEdit.facilityType || '', 
+        location: venueToEdit.location || '', 
+        price: venueToEdit.priceNum || (venueToEdit.price ? String(venueToEdit.price).replace(/[^0-9]/g, '') : '') || '', 
+        matchPrice: venueToEdit.matchPrice || '',
+        description: venueToEdit.description || '', 
+        capacity: venueToEdit.capacity || 10, 
+        fullAddress: venueToEdit.fullAddress || '',
+        amenities: Array.isArray(venueToEdit.amenities) ? venueToEdit.amenities.join(', ') : (venueToEdit.amenities || ''),
+        blockedSlots: Array.isArray(venueToEdit.blockedSlots) ? venueToEdit.blockedSlots.join(', ') : (venueToEdit.blockedSlots || ''),
+        blockedDates: Array.isArray(venueToEdit.blockedDates) ? venueToEdit.blockedDates : [],
+      });
+      
+      const existing = [];
+      if (venueToEdit.img) existing.push({ url: imgSrc(venueToEdit.img), dbPath: venueToEdit.img, existing: true });
+      if (Array.isArray(venueToEdit.gallery)) {
+        venueToEdit.gallery.forEach(g => {
+          if (g && g !== venueToEdit.img) existing.push({ url: imgSrc(g), dbPath: g, existing: true });
+        });
+      } else if (typeof venueToEdit.gallery === 'string') {
+        try {
+          const parsed = JSON.parse(venueToEdit.gallery);
+          parsed.forEach(g => {
+            if (g && g !== venueToEdit.img) existing.push({ url: imgSrc(g), dbPath: g, existing: true });
+          });
+        } catch(e) {}
+      }
+      setPreviewFiles(existing);
+    }
+  }, [venueToEdit]);
 
   // Initial photos from the venue
   const [previewFiles, setPreviewFiles] = useState(() => {
@@ -335,17 +375,79 @@ export default function EditVenue() {
             </div>
 
             {/* Blocked Scheduling */}
-            <div className="space-y-2 bg-red-50 dark:bg-red-900/10 p-5 rounded-2xl border border-red-200 dark:border-red-900/30">
-              <label className="text-sm font-bold text-red-600 dark:text-red-400 flex items-center gap-2">
-                <X className="w-4 h-4 text-red-500" /> Blocked Calendar Hours
-              </label>
-              <input
-                type="text" name="blockedSlots" value={fields.blockedSlots || ''} 
-                onChange={(e) => setFields(prev => ({ ...prev, blockedSlots: e.target.value }))}
-                placeholder="e.g. 06, 12, 18 (comma separated 24H formats)"
-                className="w-full px-4 py-3 rounded-xl border border-red-200 dark:border-red-800 bg-white dark:bg-slate-800 text-textPrimary dark:text-white focus:ring-2 focus:ring-red-500 outline-none transition"
-              />
-              <p className="text-xs text-red-500/80 font-medium">Use comma separated 24H format to block out specific hours globally across all days (useful for maintenance or private hours).</p>
+            <div className="space-y-4 bg-red-50 dark:bg-red-900/10 p-6 rounded-2xl border border-red-200 dark:border-red-900/30">
+              <div>
+                <label className="text-sm font-bold text-red-600 dark:text-red-400 flex items-center gap-2 mb-1">
+                  <X className="w-4 h-4 text-red-500" /> Blocked Time Slots
+                </label>
+                <p className="text-xs text-red-500/80 font-medium">Click on the hours below to block them from being booked globally. Useful for maintenance or daily private hours.</p>
+              </div>
+              
+              <div className="flex flex-wrap gap-2">
+                {HOURS_LIST.map(h => {
+                  const currentBlocks = fields.blockedSlots ? fields.blockedSlots.split(',').map(s => s.trim().replace(/"/g, '').replace(/\[|\]/g, '')).filter(Boolean) : [];
+                  const isBlocked = currentBlocks.includes(h);
+                  return (
+                    <button
+                      key={h}
+                      type="button"
+                      onClick={() => {
+                        const newBlocks = isBlocked ? currentBlocks.filter(b => b !== h) : [...currentBlocks, h];
+                        setFields(prev => ({ ...prev, blockedSlots: newBlocks.sort().join(', ') }));
+                      }}
+                      className={`px-3 py-2 rounded-xl text-xs font-black transition-all ${
+                        isBlocked 
+                          ? 'bg-red-500 text-white shadow-md shadow-red-200 dark:shadow-none' 
+                          : 'bg-white dark:bg-slate-800 text-gray-500 dark:text-slate-400 border border-gray-200 dark:border-slate-700 hover:border-red-300 dark:hover:border-red-500/50'
+                      }`}
+                    >
+                      {h}:00
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Blocked Dates */}
+            <div className="space-y-4 bg-orange-50 dark:bg-orange-900/10 p-6 rounded-2xl border border-orange-200 dark:border-orange-900/30">
+              <div>
+                <label className="text-sm font-bold text-orange-600 dark:text-orange-400 flex items-center gap-2 mb-1">
+                  <X className="w-4 h-4 text-orange-500" /> Blocked Specific Dates
+                </label>
+                <p className="text-xs text-orange-500/80 font-medium">Select specific calendar dates where the venue will be completely closed for all bookings.</p>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <input 
+                  type="date"
+                  min={new Date().toISOString().split('T')[0]}
+                  id="datePickerAdd"
+                  className="px-4 py-2 rounded-xl border border-orange-200 dark:border-orange-800 bg-white dark:bg-slate-800 text-textPrimary dark:text-white focus:ring-2 focus:ring-orange-500 outline-none transition text-sm"
+                  onChange={(e) => {
+                    const date = e.target.value;
+                    if (date) {
+                      const currentBlocks = Array.isArray(fields.blockedDates) ? fields.blockedDates : [];
+                      if (!currentBlocks.includes(date)) {
+                        setFields(prev => ({ ...prev, blockedDates: [...currentBlocks, date].sort() }));
+                      }
+                      e.target.value = '';
+                    }
+                  }}
+                />
+              </div>
+
+              {Array.isArray(fields.blockedDates) && fields.blockedDates.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {fields.blockedDates.map(date => (
+                    <div key={date} className="flex items-center gap-1 bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 px-3 py-1.5 rounded-lg text-xs font-bold border border-orange-200 dark:border-orange-800/50 shadow-sm">
+                      {date}
+                      <button type="button" onClick={() => setFields(prev => ({ ...prev, blockedDates: prev.blockedDates.filter(d => d !== date) }))} className="hover:text-red-500 ml-1 transition">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Description */}
