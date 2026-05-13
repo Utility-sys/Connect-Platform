@@ -71,7 +71,9 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // ── Sync DB then start server ──────────────────────────────────────────────────
-
+async function startServer() {
+  try {
+    await sequelize.sync();
     console.log('✅ Database synced');
 
     // ── Auto-seed on first boot if DB is empty ────────────────────────────────
@@ -126,13 +128,16 @@ if (process.env.NODE_ENV === 'production') {
       }
       console.log(`✅ Seeded ${VENUES.length} venues and admin account successfully.`);
     }
-    // ─────────────────────────────────────────────────────────────────────────
 
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
       initScheduler();
     });
-  })
-  .catch(err => console.error('❌ DB sync failed:', err.message));
+  } catch (err) {
+    console.error('❌ DB sync failed:', err.message);
+  }
+}
+
+startServer();
 
