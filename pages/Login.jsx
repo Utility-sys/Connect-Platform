@@ -11,6 +11,7 @@ const Login = () => {
   const { login } = useAdminAuth();
   const navigate = useNavigate();
 
+  // On submit, call login() from context. Navigate to/on success.
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
