@@ -13,6 +13,7 @@ import {
   Bell
 } from 'lucide-react';
 
+// SidebarItem: NavLink styled as a sidebar button with active highlighting.
 const SidebarItem = ({ to, icon: Icon, label }) => (
   <NavLink
     to={to}
