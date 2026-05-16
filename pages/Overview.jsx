@@ -39,6 +39,7 @@ const StatCard = ({ icon: Icon, label, value, trend, color }) => (
   </div>
 );
 
+// fetchStats: fetch platform totals and format revenue for the KPI cards.
 const Overview = () => {
   const [stats, setStats] = useState({
     users: 0,
