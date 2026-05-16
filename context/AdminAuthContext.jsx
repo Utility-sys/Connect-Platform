@@ -10,8 +10,10 @@ export const AdminAuthProvider = ({ children }) => {
   const [token, setToken] = useState(localStorage.getItem('admin_token'));
   const [loading, setLoading] = useState(true);
 
+  // Restore admin session from localStorage on app mount.
   useEffect(() => {
     if (token) {
+      // Set the shared axios Authorization header so all subsequent requests are authenticated.
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       // In a real app, we might verify the token with the backend here
       const storedAdmin = localStorage.getItem('admin_user');
@@ -24,7 +26,9 @@ export const AdminAuthProvider = ({ children }) => {
     setLoading(false);
   }, [token]);
 
+  // Verify the role is "admin" before accepting the login.
   const login = async (email, password) => {
+  // A valid customer or owner login is rejected here with a clear error message.
     try {
       const { data } = await axios.post(`${API_BASE}/auth/login`, { email, password });
       
@@ -45,6 +49,7 @@ export const AdminAuthProvider = ({ children }) => {
     }
   };
 
+  // logout: wipe all traces of the admin session from memory, storage, and axios headers.
   const logout = () => {
     setAdmin(null);
     setToken(null);
